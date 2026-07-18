@@ -15,7 +15,12 @@ export function isSupabaseConfigured() {
 let cachedClient = null
 function defaultClient() {
   if (!cachedClient) {
-    cachedClient = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
+    // flowType: 'implicit' — PKCE（デフォルト）だとマジックリンクをリクエストした
+    // ブラウザでしか認証を完了できない（code verifierがlocalStorage照合のため）。
+    // メールを別ブラウザ/デバイスで開いても認証できるようimplicit flowを使う。
+    cachedClient = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY, {
+      auth: { flowType: 'implicit' },
+    })
   }
   return cachedClient
 }
