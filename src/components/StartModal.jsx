@@ -1,10 +1,15 @@
 import { useRef, useState } from 'react'
 
 // spec.txt 3-4章: スタート画面の招待ユーザー向けログイン導線（⚙️アイコン→ポップオーバー）。
-function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onSignOut }) {
+// implement.txt 13章: メールクライアントのリンクプリフェッチでワンタイムリンクが
+// 無効化される問題を避けるため、リンククリックではなく6桁コード手入力方式を使う。
+function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onVerifyOtp, onSignOut }) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
   const [sending, setSending] = useState(false)
+  const [verifying, setVerifying] = useState(false)
   const [result, setResult] = useState(null)
 
   async function handleSend() {
@@ -12,6 +17,15 @@ function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onSignOut }) {
     setResult(null)
     const res = await onSendMagicLink(email)
     setSending(false)
+    setResult(res)
+    if (res.ok) setCodeSent(true)
+  }
+
+  async function handleVerify() {
+    setVerifying(true)
+    setResult(null)
+    const res = await onVerifyOtp(email, code)
+    setVerifying(false)
     setResult(res)
   }
 
@@ -34,7 +48,7 @@ function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onSignOut }) {
                 ログアウト
               </button>
             </>
-          ) : (
+          ) : !codeSent ? (
             <>
               <p>招待ユーザー向けログイン</p>
               <input
@@ -45,13 +59,31 @@ function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onSignOut }) {
                 onChange={(e) => setEmail(e.target.value)}
               />
               <button type="button" className="btn-primary" onClick={handleSend} disabled={!email || sending}>
-                {sending ? '送信中…' : 'ログインリンクを送る'}
+                {sending ? '送信中…' : 'ログインコードを送る'}
               </button>
               <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>
                 キャンセル
               </button>
-              {result && result.ok && <p>メールを確認してください。</p>}
               {result && !result.ok && <p className="error">送信に失敗しました: {result.error}</p>}
+            </>
+          ) : (
+            <>
+              <p>メールに届いた6桁のコードを入力してください。</p>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="text-input"
+                placeholder="123456"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+              <button type="button" className="btn-primary" onClick={handleVerify} disabled={!code || verifying}>
+                {verifying ? '確認中…' : 'ログイン'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => setCodeSent(false)}>
+                戻る
+              </button>
+              {result && !result.ok && <p className="error">確認に失敗しました: {result.error}</p>}
             </>
           )}
         </div>
@@ -70,6 +102,7 @@ function StartModal({
   isLoggedIn,
   userEmail,
   onSendMagicLink,
+  onVerifyOtp,
   onSignOut,
 }) {
   const [isActualRide, setIsActualRide] = useState(false)
@@ -82,6 +115,7 @@ function StartModal({
           isLoggedIn={isLoggedIn}
           userEmail={userEmail}
           onSendMagicLink={onSendMagicLink}
+          onVerifyOtp={onVerifyOtp}
           onSignOut={onSignOut}
         />
         <h2>🚴 gpx-editor</h2>

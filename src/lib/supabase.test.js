@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downloadGpx, getSession, listRoutes, onAuthStateChange, sendMagicLink, signOut, uploadGpx } from './supabase.js'
+import { downloadGpx, getSession, listRoutes, onAuthStateChange, sendMagicLink, signOut, uploadGpx, verifyOtp } from './supabase.js'
 
 function makeMockClient({ uploadError = null, insertError = null, removeSpy = vi.fn() } = {}) {
   return {
@@ -96,6 +96,20 @@ describe('招待制ログイン（Supabase Auth マジックリンク）', () =>
     const client = { auth: { signInWithOtp: vi.fn().mockResolvedValue({ error: { message: 'invalid email' } }) } }
     const result = await sendMagicLink('bad', { client })
     expect(result).toEqual({ ok: false, error: 'invalid email' })
+  })
+
+  it('verifyOtp: 正常系はok:trueを返す', async () => {
+    const otpVerify = vi.fn().mockResolvedValue({ error: null })
+    const client = { auth: { verifyOtp: otpVerify } }
+    const result = await verifyOtp('a@example.com', '123456', { client })
+    expect(result).toEqual({ ok: true })
+    expect(otpVerify).toHaveBeenCalledWith({ email: 'a@example.com', token: '123456', type: 'email' })
+  })
+
+  it('verifyOtp: エラー時はok:falseを返す', async () => {
+    const client = { auth: { verifyOtp: vi.fn().mockResolvedValue({ error: { message: 'invalid token' } }) } }
+    const result = await verifyOtp('a@example.com', 'bad', { client })
+    expect(result).toEqual({ ok: false, error: 'invalid token' })
   })
 
   it('getSession: セッションを返す', async () => {

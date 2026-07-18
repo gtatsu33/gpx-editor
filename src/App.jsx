@@ -45,7 +45,7 @@ function App() {
   const mapViewRef = useRef(null)
   const { status: eleStatus, retryFailed: retryEleFailed } = useElevationBackground(state.routePoints, dispatch)
   const { state: mapMatchState, run: runMapMatching, cancel: cancelMapMatching } = useMapMatching()
-  const { user, sendMagicLink, signOut } = useAuth()
+  const { user, sendMagicLink, verifyOtp, signOut } = useAuth()
   const isLoggedIn = Boolean(user)
 
   // spec.txt 6章・11章・12章: wptを含まないGPXの読込時に、全区間のターン自動検出
@@ -332,6 +332,7 @@ function App() {
           isLoggedIn={isLoggedIn}
           userEmail={user?.email ?? null}
           onSendMagicLink={sendMagicLink}
+          onVerifyOtp={verifyOtp}
           onSignOut={signOut}
         />
       )}

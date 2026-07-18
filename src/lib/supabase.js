@@ -98,6 +98,17 @@ export async function sendMagicLink(email, { client = defaultClient() } = {}) {
   return { ok: true }
 }
 
+/**
+ * メールで届いた6桁コードを検証してログインする。
+ * メールクライアントによるリンクの自動プリフェッチでワンタイムリンクが
+ * 無効化される問題を避けるため、リンククリックではなくコード手入力方式を使う。
+ */
+export async function verifyOtp(email, token, { client = defaultClient() } = {}) {
+  const { error } = await client.auth.verifyOtp({ email, token, type: 'email' })
+  if (error) return { ok: false, error: error.message || String(error) }
+  return { ok: true }
+}
+
 export async function getSession({ client = defaultClient() } = {}) {
   const { data } = await client.auth.getSession()
   return data.session

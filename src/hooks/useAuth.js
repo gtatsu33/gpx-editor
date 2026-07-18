@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { getSession, onAuthStateChange, sendMagicLink, signOut } from '../lib/supabase.js'
+import { getSession, onAuthStateChange, sendMagicLink, signOut, verifyOtp } from '../lib/supabase.js'
 
 /**
- * 招待制ログイン（Supabase Auth マジックリンク）のセッション管理。
+ * 招待制ログイン（Supabase Auth メールOTP）のセッション管理。
  * spec.txt 19章・3-4章／implement.txt 13章。
- * マジックリンククリック後のセッション復元はsupabase-jsの
- * detectSessionInUrl（デフォルト有効）が自動処理するため、ここでは
- * getSession/onAuthStateChangeを購読するだけでよい。
+ * メールで届く6桁コードをverifyOtpで検証してログインする
+ * （メールクライアントのリンクプリフェッチでワンタイムリンクが
+ * 無効化される問題を避けるため、リンククリック方式は使わない）。
  */
 export function useAuth() {
   const [user, setUser] = useState(null)
@@ -29,5 +29,5 @@ export function useAuth() {
     }
   }, [])
 
-  return { user, loading, sendMagicLink, signOut }
+  return { user, loading, sendMagicLink, verifyOtp, signOut }
 }
