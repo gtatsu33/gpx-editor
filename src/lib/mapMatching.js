@@ -10,7 +10,7 @@ const VALHALLA_URL = 'https://valhalla1.openstreetmap.de/trace_attributes'
 export async function matchChunk(chunk, { searchRadius = 50, fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   const res = await fetchWithTimeout(VALHALLA_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Client-Id': 'gpx-editor' },
     body: JSON.stringify({
       shape: chunk.map(([lat, lon]) => ({ lat, lon })),
       costing: 'bicycle',
