@@ -150,8 +150,10 @@ const MapView = forwardRef(function MapView(
   useEffect(() => {
     const map = L.map(containerRef.current).setView([center.lat, center.lng], zoom)
     mapRef.current = map
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
+        'routing by <a href="https://project-osrm.org/">OSRM</a>',
       maxZoom: 19,
     }).addTo(map)
 

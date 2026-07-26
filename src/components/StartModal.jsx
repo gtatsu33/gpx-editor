@@ -73,7 +73,7 @@ function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onVerifyOtp, onS
                 type="text"
                 inputMode="numeric"
                 className="text-input"
-                placeholder="12345678"
+                placeholder="123456"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
               />

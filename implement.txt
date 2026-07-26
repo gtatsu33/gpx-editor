@@ -987,6 +987,47 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
       短時間に大量の個別クエリを連投しない設計にする（既存実装同様、
       複数ターン候補は1回のクエリにまとめるバッチ方式を維持する）
 
+────────────────────────────────────────
+18-6. 外部無料APIのFair Use対応（2026-07-20 追加修正）
+────────────────────────────────────────
+
+  gpx-editorが利用する各外部無料公開APIについて、公式ドキュメントを
+  再調査した結果、以下2点が現行のFair Use方針と整合していなかった
+  ため修正した。
+
+  1. OSMタイル（lib/MapView.jsx）:
+     旧: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+     新: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+     理由: 現行のOSMF Tile Usage Policy
+     （https://operations.osmfoundation.org/policies/tiles/）は
+     単一ホストのみを明記しており、{s}によるサブドメイン分散は
+     「低速化・予告なき遮断の対象になり得る」と警告されている。
+
+  2. OSRM（lib/routing.js）:
+     - attribution表示にOSRMの出典を追加（MapView.jsxのLeaflet
+       attributionコントロールに"routing by OSRM"を追記）。
+       理由: OSRM公式Api usage policy
+       （https://github.com/Project-OSRM/osrm-backend/wiki/Api-usage-policy）
+       が「ODbLおよびOSRMの出典表示」を明示的に要求しているため。
+     - calcRouteSegment()にクライアント側スロットリングを追加。
+       モジュールスコープの直近呼び出し時刻を基準に、前回呼び出しから
+       1000ms未満なら残り時間だけ待機してから送信する。
+       理由: 公式ポリシーが「1リクエスト/秒を超えないこと」を明記して
+       おり、連続クリック等の高速操作時にも守るため。
+       テスト容易性のため sleep/now を注入可能にした（デフォルトは
+       実時間）。
+
+  3. Valhalla（lib/mapMatching.js）:
+     trace_attributesへのPOSTリクエストに X-Client-Id: gpx-editor
+     ヘッダーを追加。
+     理由: FOSSGIS運用の公開デモサーバーが、アプリ識別のために
+     X-Client-Idヘッダーの付与を推奨事項として案内しているため
+     （必須ではないが低コストで対応可能）。
+
+  Overpass API・国土地理院標高APIについては、既存実装（18-5章、
+  および13-2章のサーキットブレーカー・キャッシュ・地理フィルタ等）が
+  現行の公式方針と概ね整合していることを確認済みで、変更なし。
+
 
 ================================================================================
   以上（随時追記）
