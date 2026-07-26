@@ -296,7 +296,7 @@ export function routeReducer(state, action) {
       return { ...state, routePoints: restored, undoSnapshot: null, routeModified }
     }
 
-    // 15章「🔍 ターンポイント検出」一括実行。Undo対象
+    // 15章「🔍 ターンポイント検出」（再検出ボタン）一括実行。Undo対象
     case 'APPLY_TURN_DETECTION': {
       const { assignments } = action.payload // [{ trkptIndex, delta, name }]
       const undoSnapshot = withUndoSnapshot(state)
@@ -308,6 +308,35 @@ export function routeReducer(state, action) {
       })
       const finalRp = rp.map((p) => ({ ...p, changed: false }))
       return { ...state, routePoints: finalRp, undoSnapshot, routeModified: false }
+    }
+
+    // implement.txt: ルート編集に追従する自動バックグラウンド検出（角度検出のみ）。
+    // 交差点名はまだ無く、wpt.pending=trueの仮状態で即時反映する。ユーザー操作の
+    // 結果ではなく自動処理のためUndo対象外（undoSnapshotは書き換えない）。
+    case 'APPLY_TURN_CANDIDATES': {
+      const { assignments } = action.payload // [{ trkptIndex, delta }]
+      const rp = state.routePoints.map((p) => ({ ...p }))
+      assignments.forEach(({ trkptIndex, delta }) => {
+        if (rp[trkptIndex].wpt === null) {
+          rp[trkptIndex] = { ...rp[trkptIndex], wpt: { name: combineTurnName(delta, null), delta, pending: true } }
+        }
+      })
+      const finalRp = rp.map((p) => ({ ...p, changed: false }))
+      return { ...state, routePoints: finalRp, routeModified: false }
+    }
+
+    // implement.txt: バックグラウンドで取得した交差点名をpending中のwptへ反映する。
+    // 標高のSET_ELE_FIX_BATCHと同様、自動処理のためUndo対象外。
+    case 'SET_TURN_NAME_BATCH': {
+      const { assignments } = action.payload // [{ trkptIndex, name }]
+      const rp = [...state.routePoints]
+      assignments.forEach(({ trkptIndex, name }) => {
+        const wpt = rp[trkptIndex]?.wpt
+        if (wpt && wpt.pending) {
+          rp[trkptIndex] = { ...rp[trkptIndex], wpt: { ...wpt, name, pending: false } }
+        }
+      })
+      return { ...state, routePoints: rp }
     }
 
     // 15章「🗑」削除ボタン。Undo対象（今回のUndo拡張で追加）

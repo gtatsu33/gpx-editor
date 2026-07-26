@@ -4,7 +4,7 @@ import { wptStyle } from '../lib/turns.js'
 /**
  * ターンポイント一覧パネル。spec.txt 15章。
  */
-export default function TurnPointList({ routePoints, routeModified, canUndo, dispatch, onDetectTurns, onFocus, focusWpt }) {
+export default function TurnPointList({ routePoints, turnStatus, canUndo, dispatch, onDetectTurns, onFocus, focusWpt }) {
   const currentWpts = routePoints
     .map((p, i) => (p.wpt ? { trkptIdx: i, p } : null))
     .filter(Boolean)
@@ -32,8 +32,8 @@ export default function TurnPointList({ routePoints, routeModified, canUndo, dis
           ↩ 戻す
         </button>
       </div>
-      {routeModified && currentWpts.length > 0 && (
-        <p className="tpl-warning">⚠️ ルートが変更されています。ターンポイント検出を実行してください。</p>
+      {turnStatus.state === 'running' && turnStatus.chunksRemaining > 0 && (
+        <p className="tpl-warning">🔍 交差点名取得中…（残り{turnStatus.chunksRemaining}チャンク）</p>
       )}
       {currentWpts.length > 0 && (
         <div className="tpl-header-row">
@@ -71,12 +71,15 @@ export default function TurnPointList({ routePoints, routeModified, canUndo, dis
                 }}
                 type="text"
                 value={p.wpt.name}
+                disabled={p.wpt.pending}
+                title={p.wpt.pending ? '交差点名取得中…' : undefined}
                 onChange={(e) => dispatch({ type: 'RENAME_WPT', payload: { trkptIndex: trkptIdx, name: e.target.value } })}
               />
               <button
                 type="button"
                 className="btn-danger btn-icon"
-                title="削除"
+                title={p.wpt.pending ? '交差点名取得中…' : '削除'}
+                disabled={p.wpt.pending}
                 onClick={() => dispatch({ type: 'DELETE_WPT', payload: { trkptIndex: trkptIdx } })}
               >
                 🗑

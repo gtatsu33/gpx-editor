@@ -97,6 +97,19 @@ export default function ElevationChart({ routePoints, hoveredKm, onHoverKm, onCl
         />
       ))}
 
+      {definedVals.length > 0 && (
+        <g>
+          <line x1={MARGIN.left - 4} x2={MARGIN.left} y1={yScale(eleMax)} y2={yScale(eleMax)} stroke="#888" />
+          <text x={MARGIN.left - 6} y={yScale(eleMax) + 3} fontSize="9" textAnchor="end" fill="#888">
+            {eleMax.toFixed(0)}m
+          </text>
+          <line x1={MARGIN.left - 4} x2={MARGIN.left} y1={yScale(eleMin)} y2={yScale(eleMin)} stroke="#888" />
+          <text x={MARGIN.left - 6} y={yScale(eleMin) + 3} fontSize="9" textAnchor="end" fill="#888">
+            {eleMin.toFixed(0)}m
+          </text>
+        </g>
+      )}
+
       {ticks.map((km) => (
         <g key={km}>
           <line

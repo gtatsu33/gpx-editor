@@ -167,6 +167,161 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2A. ターンポイントの自動バックグラウンド検出（spec.txt 15章）
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  【変更履歴・2026-07-26】当初は「🔍 ターンポイント検出」ボタンを押した
+  時だけ、changed=trueの区間に対して角度検出＋Overpass交差点名取得を
+  一括実行していたが、この処理は待ち時間があるにもかかわらず進捗が
+  分かりにくく、ボタン押下中は他の操作もしづらかった。標高のリアルタイム
+  背景取得（2章）と同じ「明示操作なしで自動的に進む」設計に合わせ、以下の
+  方式に変更した。ボタンは「即座に再実行したい場合の手動トリガー」として
+  残す。
+
+  useTurnDetectionBackground.js（useElevationBackground.jsと同じ設計の
+  フック）が routePoints の変更をデバウンス（800ms）で検知して以下を行う:
+
+  ステップA（同期・高速・即時反映）:
+    - changed=trueの点をcontiguousRanges（routePoints.js）で連続区間化し、
+      各区間ごとに11章のdetectTurns（角度法）を実行する
+    - まだwptが無い点についてのみ、方向ラベルだけの仮の名前
+      （combineTurnName(delta, null)）とdelta・pending: trueを持つwptを
+      即座に反映する（APPLY_TURN_CANDIDATES action）。この時点で対象区間の
+      changedはfalseに戻し、route_modifiedもfalseにする
+    - このactionはユーザーの明示操作の結果ではなく自動処理のため、
+      undoSnapshotは書き換えない（直前の実際の編集操作のUndoを
+      壊さないため）
+
+  ステップB（非同期・バックグラウンド・段階反映）:
+    - pending: trueなwptを最大10件ずつのチャンクに分割し、チャンクごとに
+      順次 fetchIntersectionNames（overpass.js、12章）を呼び出す
+    - チャンクの結果が返るたびに、combineTurnName(delta, 取得名 ?? null)
+      で最終的な名前を組み立て、SET_TURN_NAME_BATCH actionでpendingを
+      falseに解除しつつ名前を確定する（このactionもUndo対象外）
+    - Overpassが失敗/該当なしだった場合も、ステップAで設定済みの方向
+      ラベルのみの名前のままpendingをfalseにする（無期限に取得中のまま
+      止まることを避ける。標高取得のような失敗カウント・サーキット
+      ブレーカーは設けない。交差点名は付加情報であり、方向ラベルのみの
+      フォールバックが常に使えるため）
+
+  【2026-07-26追記・並行編集時の安全策】
+    Overpassの応答を待っている間にACPT_DRAG_END／ACPT_DELETE／
+    INSERT_ACPTなどでroute_pointsの途中がsplice（配列途中の要素数変更）
+    されると、待機開始時に控えたtrkptIndexが指す位置が別の点にずれる
+    可能性がある。これを防ぐため、応答適用時に「応答を待ち始めた時点の
+    緯度経度」と「現在その位置にある点の緯度経度」が一致する場合のみ
+    SET_TURN_NAME_BATCHで書き込む（useElevationBackground.jsの
+    rpNow[r.index].lat/lon一致チェックと同じ安全策）。一致しない場合は
+    その点への書き込みは行わず捨てる。この場合、当該の点自体は
+    pending: trueのまま変化していないため、次にfetchPendingNamesが
+    呼ばれるタイミング（後述のとおり、進行中の検出が終わった直後に
+    必ず1回走る）で改めて対象として拾われ、取り消しになることはない。
+
+  【2026-07-26追記・busy中に複数回編集が起きた場合】
+    runDetection実行中（Overpass待機中含む）にルート編集が複数回発生
+    しても、rerunRequestedRefは単純な真偽値フラグであり、busy中の
+    runDetection呼び出しは全て「即returnしてフラグを立てるだけ」になる。
+    そのため編集が何回重なっても、現在の実行が終わった後に走る再実行は
+    1回だけであり、かつその再実行は待機列を消化するのではなくその時点の
+    最新route_pointsを丸ごと再評価する。つまり実行待ちが積み上がる
+    ことはなく、蓄積した変更はまとめて1回の再検出で処理される。
+
+  【2026-07-26追記・バグ修正: フェッチ中の新規編集がステップAごと
+  ブロックされていた問題】
+    上記の runDetection は角度検出（ステップA・同期・高速）と交差点名
+    フェッチ（ステップB・非同期・低速）を1つの runningRef で一括りに
+    ロックしていたため、ステップBのOverpass取得が完了するまで、次の
+    編集のステップA（仮のwptを即座に地図・一覧へ反映する処理）まで
+    ブロックされてしまっていた。結果として「フェッチ中に新しく増えた
+    はずのwptが、地図にも一覧にも表示されず、フェッチ完了後にまとめて
+    現れる」という意図しない挙動になっていた。
+
+    これを修正し、以下の2つの独立したロックに分離した:
+      - runAngleDetection()（ステップA）: デバウンス発火のたびに
+        常に即座に実行する（フェッチが進行中かどうかに関わらない）。
+        処理自体が同期・高速なため、専用のロックは不要
+      - runNameFetchLoop()（ステップB）: fetchRunningRefで多重起動のみ
+        防止する。1回のバッチを処理して終わるのではなく、
+        「pendingが無くなるまで」whileループで回り続け、ループの
+        各周回でpendingIdxをroutePointsRefから再計算し直す。これにより、
+        ループ実行中に別のruntAngleDetection()呼び出しで新たに増えた
+        pendingも、同じループの次の周回で自然に拾われる（ループを
+        再起動する必要がない）
+    この分離により、フェッチ中に発生した新しい編集の仮wptは
+    （デバウンス分＝最大800ms程度の遅延で）即座に地図・一覧に反映され、
+    その交差点名取得も進行中のフェッチループにそのまま合流する。
+
+  【2026-07-26追記・バグ修正: 進捗表示の分母(m)が実際の候補数を超える
+  問題】
+    上記のrunNameFetchLoopは、whileループの各周回でroutePointsRefから
+    「pending中の点」を再計算していた。しかしdispatch(SET_TURN_NAME_BATCH)
+    はReactのstate更新を非同期に予約するだけで、呼び出し直後の同期的な
+    継続処理の中ではroutePointsRefはまだ更新されない。そのため、ある
+    周回でOverpass取得・dispatchを終えた直後の「次の周回」が、実際には
+    再レンダリングがまだ済んでいない古いroutePointsRefを見てしまい、
+    同じ点をまだpendingだと誤認して再度Overpassへ問い合わせる（無駄な
+    重複リクエスト）＋doneも二重に加算する、という不具合があった
+    （progress表示のmが実際の候補数より大きくなる形で顕在化した）。
+
+    修正として、ループのスコープで「このループ内で一度処理を投げた点」
+    を座標キー（緯度経度、小数点以下6桁）のSet（handledKeys）で記録し、
+    次の周回でpending対象を数える際にこのSetに含まれる点は除外する
+    ようにした。インデックスではなく座標をキーにしているのは、
+    ルート編集によるインデックスのずれ（前述の緯度経度一致チェックと
+    同じ理由）の影響を受けないようにするため。
+
+  【2026-07-26追記・仕様変更: 進捗表示を件数(n/m件)からチャンク数に】
+    12-1章の交差点名検索はOverpassクエリが複数候補をまとめて1回で
+    問い合わせる仕様であり、件数ベースの進捗（n/m件）は「1件でも10件
+    でも1回の往復で一括して結果が返る」という実態と合わない
+    （途中経過が見えず、いきなりn=mに飛ぶ）。
+    そのため進捗表示を「🔍 交差点名取得中…（残りNチャンク）」に変更した
+    （spec.txt 15章）。statusの形を { state, chunksRemaining } に変更し、
+    Nは以下の合計で計算する:
+      - 1（現在Overpassに問い合わせ中の1チャンク）
+      - Math.ceil(未送信pendingの残り件数 / NAME_BATCH_SIZE)
+      - Math.ceil(countWaitingCandidates()の見積り件数 / NAME_BATCH_SIZE)
+        （まだ角度検出も済んでいない、次回以降のラウンドで候補になる
+        はずの点。既存のcountWaitingCandidates()をそのまま流用）
+
+  【2026-07-26追記・バグ修正: 残りチャンク数の更新がループの周回時にしか
+  起きない問題】
+    上記のchunksRemaining計算はrunNameFetchLoopのwhileループの各周回
+    冒頭でしか行っておらず、Overpassへの問い合わせ（await）が返って
+    くるまで、その間に新たに増えたpending/待機中候補が表示に反映され
+    なかった（例: フェッチ中に更にルート延伸しても、現在のチャンクが
+    完了するまで表示上のNが変わらない）。
+
+    修正として、チャンク数の見積りロジックを estimateChunksRemaining(rp)
+    に共通化した上で、routePointsの変化を購読する別のuseEffect
+    （デバウンス無し・即時）を追加し、fetchRunningRef.current===trueの
+    間はroutePointsが変わるたびに都度setStatusし直すようにした。これに
+    より、フェッチ実行中に発生した編集は、ループの次の周回を待たず
+    即座に「残りNチャンク」の表示に反映される。
+
+  UI表示（TurnPointList.jsx）:
+    - pending: trueの行は、名前入力欄と🗑削除ボタンをdisabledにする
+      （表示はするが操作不可。テキスト入力欄は背景色をグレーにして
+      操作不可であることを視覚的にも分かりやすくする）
+    - フック側で { state: 'running'|'idle', done, total } のstatusを
+      保持し、runningの間「🔍 交差点名取得中…（{done}/{total}件）」を
+      表示する（従来の「ルートが変更されています」警告はこれに置き換えた）
+    - total は「今回のバッチで取得中の件数」に加え、取得の最中に新たに
+      発生したchanged区間から見積もった「待機中（次回以降のバッチで
+      処理される）候補数」も加算する。見積りは進捗更新のたびに
+      countWaitingCandidates()で再計算し、常に最新の見込みを表示する。
+      次のバッチ（次のfetchPendingNames呼び出し）が始まった時点で
+      totalは新しいバッチ自身の件数から数え直し、前バッチの件数は
+      引き継がない
+
+  「🔍 ターンポイント検出」ボタン（TurnPointList.jsx／App.jsxの
+  handleDetectTurns）自体の実装（changed区間への一括detectTurns＋
+  fetchIntersectionNames＋APPLY_TURN_DETECTION）は変更していない。
+  自動検出により通常はchanged区間が残らないため、このボタンは
+  「保険的な再実行」として機能する。
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 3. 技術スタック全体方針
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -213,6 +368,7 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
         useRouteReducer.js       route_points と関連状態のreducer（5章）
         useMapViewState.js       地図中心/ズームのlocalStorage同期（12章）
         useElevationBackground.js  リアルタイム標高取得（2章）
+        useTurnDetectionBackground.js  ターンポイント自動バックグラウンド検出（2A章）
       lib/
         gpx.js                  GPXパース/ビルド（7章）
         geo.js                  bearing/haversine/angleDiff等の幾何計算
@@ -384,6 +540,26 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     props: routePoints, hoveredKm（Contextから）
     callbacks: onHoverKm(km|null), onClickKm(km)
 
+  【2026-07-26追記】Y軸（標高）の最小・最大値を左端の縦軸に表示する。
+  org/fix両系列の定義済み値から求めたeleMin/eleMaxをグラフ上端・下端の
+  高さにそれぞれ小さな目盛り線＋「{値}m」ラベルとして描く（X軸のkm
+  目盛りと同じ見た目）。標高データが一切無い場合（definedVals.length
+  === 0、eleMin/eleMaxがダミー値の0/1）はラベルを表示しない。
+
+  【2026-07-26追記・バグ修正: 獲得標高が新規ルートで常に「---m」に
+  なる問題】
+    App.jsxの獲得標高（gainM）計算は
+    `state.eleChoice === 'fix' ? 'eleFix' : 'eleOrg'` でeleKeyを決めて
+    いたが、eleChoiceは保存画面（SaveDialog、16-2章）で選択されるまで
+    既定値'org'のままである。新規ルート作成時はele_orgが存在せず
+    ele_fix（背景取得、2章）のみが埋まるため、グラフはele_fixで正しく
+    表示されるのに獲得標高は常に空のele_orgを見て「---m」のままに
+    なっていた。ElevationChart.jsxのhasOrg||hasFixによるフォールバック
+    と同じ考え方で、ele_orgのデータが1件も無い場合はele_fixに
+    フォールバックするよう修正した:
+      hasOrgData = rp.some(p => p.eleOrg !== null && p.eleOrg !== undefined)
+      eleKey = (eleChoice === 'fix' || !hasOrgData) ? 'eleFix' : 'eleOrg'
+
   MapViewは同じ hoveredKm 状態を購読してカーソル矢印を描画する
   （spec.txt 7-3章）。
 
@@ -412,6 +588,8 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     - ターンポイント名のテキスト入力（連続入力のため。ブラウザの
       テキストフィールドネイティブUndoに委ねる）
     - 標高データ選択（org/fix）の切り替え（表示切替のみ）
+    - APPLY_TURN_CANDIDATES・SET_TURN_NAME_BATCH（2A章のターンポイント
+      自動バックグラウンド検出。ユーザー操作ではなく自動処理のため）
 
   UNDO actionは undoSnapshot の内容で routePointsを置き換え、
   undoSnapshotをnullに戻す（spec.txt 14章と同じ挙動）。
@@ -471,12 +649,12 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
 ────────────────────────────────────────
 
 spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメールワンタイム
-パスワード（パスワードレス、メールで届く6桁コードを手入力してログイン）
+パスワード（パスワードレス、メールで届く8桁コードを手入力してログイン）
 で実現する。
 
   【変更履歴・2026-07-18】当初はメール内リンクをクリックする
   マジックリンク方式で実装したが、以下の問題が判明したため
-  6桁コード手入力方式に変更した:
+  8桁コード手入力方式に変更した:
     - PKCE flow（supabase-js既定）はリンクをリクエストしたブラウザの
       localStorageにcode verifierを保存し照合するため、別ブラウザ/
       デバイスでリンクを開くと認証に失敗する
@@ -495,7 +673,7 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
       メールアドレスを個別に登録する（アプリ内には登録UIを作らない）
     - Authentication → Email Templates → Magic Link: テンプレートから
       {{ .ConfirmationURL }}（クリック用リンク）を削除し、
-      {{ .Token }}（6桁コード）のみを案内する内容に書き換える
+      {{ .Token }}（8桁コード）のみを案内する内容に書き換える
       （リンクが残っていると、そちらがプリフェッチされてコードごと
       無効化されてしまうため）
     - RLSポリシーを、route_filesテーブルのINSERT/SELECT、gpx_routes
@@ -510,7 +688,7 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
     - sendMagicLink(email): supabase.auth.signInWithOtp({ email }) を
       呼び出し、コード付きメールを送信する
     - verifyOtp(email, token): supabase.auth.verifyOtp({ email, token,
-      type: 'email' }) を呼び出し、6桁コードを検証してログインする
+      type: 'email' }) を呼び出し、8桁コードを検証してログインする
     - getSession() / onAuthStateChange(callback): 現在のセッション取得と
       変化の購読
     - signOut(): supabase.auth.signOut()
@@ -528,7 +706,7 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
     クリックでポップオーバーを開閉する。未ログイン時は2ステップUIとする:
     1. メールアドレス入力欄＋「ログインコードを送る」ボタン。
        sendMagicLinkを呼び、成功したら次のステップへ進む
-    2. 6桁コード入力欄＋「ログイン」ボタンを表示。verifyOtpを呼んで
+    2. 8桁コード入力欄＋「ログイン」ボタンを表示。verifyOtpを呼んで
        検証する（「戻る」でメールアドレス入力に戻れる）
     ログイン中はログイン中のメールアドレス表示＋「ログアウト」ボタンを表示する。
     「☁️ クラウドからルートを選ぶ」ボタンは、isLoggedInがfalseの間

@@ -297,6 +297,63 @@ describe('routeReducer', () => {
     })
   })
 
+  describe('APPLY_TURN_CANDIDATES（自動バックグラウンド検出・Undo対象外）', () => {
+    it('wptが無い点にpending中のwptを設定し、changedを全てfalseに戻す', () => {
+      const state = {
+        ...initialRouteState(),
+        routePoints: [
+          makeRoutePoint(35.0, 139.0, { isAcpt: true, wpt: { name: 'スタート', delta: null }, changed: false }),
+          makeRoutePoint(35.001, 139.0, { changed: true }),
+          makeRoutePoint(35.002, 139.0, { wpt: { name: '既存', delta: 10 }, changed: true }),
+        ],
+      }
+      const next = routeReducer(state, {
+        type: 'APPLY_TURN_CANDIDATES',
+        payload: { assignments: [{ trkptIndex: 1, delta: 70 }, { trkptIndex: 2, delta: 5 }] },
+      })
+      expect(next.routePoints[1].wpt).toEqual({ name: '右折', delta: 70, pending: true })
+      expect(next.routePoints[2].wpt).toEqual({ name: '既存', delta: 10 })
+      expect(next.routePoints.every((p) => p.changed === false)).toBe(true)
+      expect(next.routeModified).toBe(false)
+    })
+
+    it('undoSnapshotを書き換えない（自動処理のためUndo対象外）', () => {
+      const state = {
+        ...initialRouteState(),
+        undoSnapshot: 'previous-snapshot',
+        routePoints: [makeRoutePoint(35.001, 139.0, { changed: true })],
+      }
+      const next = routeReducer(state, {
+        type: 'APPLY_TURN_CANDIDATES',
+        payload: { assignments: [{ trkptIndex: 0, delta: 70 }] },
+      })
+      expect(next.undoSnapshot).toBe('previous-snapshot')
+    })
+  })
+
+  describe('SET_TURN_NAME_BATCH（自動バックグラウンド検出・Undo対象外）', () => {
+    it('pending中のwptにのみ交差点名を反映し、pendingを解除する', () => {
+      const state = {
+        ...initialRouteState(),
+        routePoints: [
+          makeRoutePoint(35.001, 139.0, { wpt: { name: '右折', delta: 70, pending: true } }),
+          makeRoutePoint(35.002, 139.0, { wpt: { name: '既存', delta: 10 } }),
+        ],
+      }
+      const next = routeReducer(state, {
+        type: 'SET_TURN_NAME_BATCH',
+        payload: {
+          assignments: [
+            { trkptIndex: 0, name: 'サンプル交差点を右折' },
+            { trkptIndex: 1, name: '上書きされないはず' },
+          ],
+        },
+      })
+      expect(next.routePoints[0].wpt).toEqual({ name: 'サンプル交差点を右折', delta: 70, pending: false })
+      expect(next.routePoints[1].wpt).toEqual({ name: '既存', delta: 10 })
+    })
+  })
+
   describe('LOAD_PARSED_GPX（Phase4暫定・表示確認用）', () => {
     it('wpt付きGPXを最近傍trkptに割り当てる', () => {
       const state = initialRouteState()

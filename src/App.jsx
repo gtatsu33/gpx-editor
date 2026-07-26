@@ -9,6 +9,7 @@ import NetworkPickerDialog from './components/NetworkPickerDialog.jsx'
 import StartModal from './components/StartModal.jsx'
 import DiscardConfirmModal from './components/DiscardConfirmModal.jsx'
 import { useElevationBackground } from './hooks/useElevationBackground.js'
+import { useTurnDetectionBackground } from './hooks/useTurnDetectionBackground.js'
 import { useMapMatching } from './hooks/useMapMatching.js'
 import { useAuth } from './hooks/useAuth.js'
 import { parseGpx } from './lib/gpx.js'
@@ -44,6 +45,7 @@ function App() {
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
   const mapViewRef = useRef(null)
   const { status: eleStatus, retryFailed: retryEleFailed } = useElevationBackground(state.routePoints, dispatch)
+  const { status: turnStatus } = useTurnDetectionBackground(state.routePoints, dispatch)
   const { state: mapMatchState, run: runMapMatching, cancel: cancelMapMatching } = useMapMatching()
   const { user, sendMagicLink, verifyOtp, signOut } = useAuth()
   const isLoggedIn = Boolean(user)
@@ -300,7 +302,8 @@ function App() {
     }
     totalDistKm /= 1000
 
-    const eleKey = state.eleChoice === 'fix' ? 'eleFix' : 'eleOrg'
+    const hasOrgData = rp.some((p) => p.eleOrg !== null && p.eleOrg !== undefined)
+    const eleKey = state.eleChoice === 'fix' || !hasOrgData ? 'eleFix' : 'eleOrg'
     const elevs = rp.map((p) => p[eleKey])
     let gainM = null
     if (elevs.some((v) => v !== null && v !== undefined)) {
@@ -406,7 +409,7 @@ function App() {
         <div className="list-col">
           <TurnPointList
             routePoints={state.routePoints}
-            routeModified={state.routeModified}
+            turnStatus={turnStatus}
             canUndo={state.undoSnapshot !== null}
             dispatch={dispatch}
             onDetectTurns={handleDetectTurns}
