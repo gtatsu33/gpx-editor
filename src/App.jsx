@@ -76,6 +76,7 @@ function App() {
     setEleSourceGsi(eleSourceGsi)
 
     const hasWpts = waypoints.length > 0
+    let finalPoints
     if (isActualRide && !hasWpts) {
       // spec.txt 6章・10章: 実走行データはRDP間引き→マップマッチングを行う
       // （wpt確定済みGPXの場合はスキップしてルートデータと同じ経路を通る）
@@ -88,14 +89,19 @@ function App() {
         type: 'LOAD_MATCHED_ROUTE',
         payload: { matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi },
       })
+      finalPoints = matchedPoints
     } else if (!hasWpts) {
       const points = trkpts.map((t) => [t.lat, t.lon])
       const turnAssignments = await detectAndNameTurns(points)
       dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, turnAssignments, eleSourceGsi } })
+      finalPoints = points
     } else {
       dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, eleSourceGsi } })
+      finalPoints = trkpts.map((t) => [t.lat, t.lon])
     }
     setStarted(true)
+    // spec.txt 7-1章: 読み込み直後はルート全域が収まるよう地図中心・ズームを強制する
+    mapViewRef.current?.fitToPoints(finalPoints)
   }
 
   const handleFileChange = async (e, isActualRide) => {
@@ -276,7 +282,7 @@ function App() {
     dispatch({ type: 'APPLY_TURN_DETECTION', payload: { assignments } })
   }
 
-  const { trkptsForMap, acptsForMap, wptsForMap, center, totalDistKm, gainM } = useMemo(() => {
+  const { trkptsForMap, acptsForMap, wptsForMap, totalDistKm, gainM } = useMemo(() => {
     const rp = state.routePoints
     const trkptsForMap = rp.map((p) => [p.lat, p.lon])
     const acptsForMap = rp
@@ -289,12 +295,6 @@ function App() {
         return { lat: p.lat, lng: p.lon, trkptIdx: i, name: p.wpt.name, color }
       })
       .filter(Boolean)
-
-    let center = DEFAULT_CENTER
-    if (rp.length) {
-      const q = Math.floor(rp.length / 4)
-      center = { lat: rp[q].lat, lng: rp[q].lon }
-    }
 
     let totalDistKm = 0
     for (let i = 0; i < rp.length - 1; i++) {
@@ -315,7 +315,7 @@ function App() {
       }
     }
 
-    return { trkptsForMap, acptsForMap, wptsForMap, center, totalDistKm, gainM }
+    return { trkptsForMap, acptsForMap, wptsForMap, totalDistKm, gainM }
   }, [state.routePoints, state.eleChoice])
 
   // spec.txt 4章: GPXのトラック名 → ファイル名 → 新規ルート の優先順で決定
@@ -395,7 +395,7 @@ function App() {
             trkpts={trkptsForMap}
             acpts={acptsForMap}
             wpts={wptsForMap}
-            center={center}
+            center={DEFAULT_CENTER}
             zoom={13}
             onEvent={handleMapEvent}
             focusCenter={focusCenter}

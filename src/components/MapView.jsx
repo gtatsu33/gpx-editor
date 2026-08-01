@@ -144,6 +144,17 @@ const MapView = forwardRef(function MapView(
         { label: '✖ キャンセル', onClick: () => {} },
       ])
     },
+    // ルート読み込み直後の明示的な中心合わせ（spec.txt 7-1章）。
+    // ルート全体が収まるズーム・中心に地図を合わせる。
+    fitToPoints(points) {
+      const map = mapRef.current
+      if (!map || !points || points.length === 0) return
+      if (points.length === 1) {
+        map.setView(points[0], 15)
+        return
+      }
+      map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 17 })
+    },
   }))
 
   // 地図の生成（マウント時のみ）
