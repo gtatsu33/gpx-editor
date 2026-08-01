@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>gpx-editor マニュアル</title>
+<meta name="description" content="gpx-editor の使い方ガイド。GPXルートの読み込み・編集・ターンポイント作成・保存の手順を説明します。" />
+<style>
+  :root {
+    --text: #6b6375;
+    --text-h: #08060d;
+    --bg: #fff;
+    --bg-card: #fafafa;
+    --border: #e5e4e7;
+    --code-bg: #f4f3ec;
+    --accent: #aa3bff;
+    --accent-bg: rgba(170, 59, 255, 0.1);
+    --accent-bg-soft: rgba(170, 59, 255, 0.05);
+    --accent-border: rgba(170, 59, 255, 0.5);
+    --shadow: rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+    --btn-primary-bg: #9333ea;
+    --btn-primary-bg-hover: #7e22ce;
+    --warn-bg: rgba(234, 179, 8, 0.12);
+    --warn-border: rgba(202, 138, 4, 0.4);
+    --sans: system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --text: #9ca3af;
+      --text-h: #f3f4f6;
+      --bg: #16171d;
+      --bg-card: #1b1c23;
+      --border: #2e303a;
+      --code-bg: #1f2028;
+      --accent: #c084fc;
+      --accent-bg: rgba(192, 132, 252, 0.15);
+      --accent-bg-soft: rgba(192, 132, 252, 0.08);
+      --accent-border: rgba(192, 132, 252, 0.5);
+      --shadow: rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+      --btn-primary-bg: #a855f7;
+      --btn-primary-bg-hover: #9333ea;
+      --warn-bg: rgba(234, 179, 8, 0.1);
+      --warn-border: rgba(202, 138, 4, 0.5);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 16px/1.7 var(--sans);
+    color: var(--text);
+    background: var(--bg);
+  }
+  a { color: var(--accent); }
+  header.top {
+    padding: 32px 20px 24px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    background: var(--accent-bg-soft);
+  }
+  header.top h1 {
+    margin: 0 0 6px;
+    font-size: 28px;
+    color: var(--text-h);
+    font-weight: 600;
+  }
+  header.top p {
+    margin: 0;
+    color: var(--text);
+    font-size: 14px;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+  }
+  nav.toc {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+    box-shadow: var(--shadow);
+  }
+  nav.toc h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    color: var(--text-h);
+  }
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.4em;
+    columns: 2;
+    column-gap: 24px;
+  }
+  nav.toc li { margin-bottom: 6px; break-inside: avoid; }
+  nav.toc a { text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  section.chapter {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+    scroll-margin-top: 16px;
+  }
+  section.chapter h2 {
+    margin: 0 0 4px;
+    font-size: 20px;
+    color: var(--text-h);
+  }
+  section.chapter h3 {
+    font-size: 16px;
+    color: var(--text-h);
+    margin: 20px 0 8px;
+  }
+  section.chapter p { margin: 8px 0; }
+  section.chapter ul, section.chapter ol { margin: 8px 0; padding-left: 1.4em; }
+  section.chapter li { margin-bottom: 4px; }
+  .back-to-top {
+    display: inline-block;
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+  }
+  .back-to-top:hover { border-color: var(--accent-border); color: var(--accent); }
+  code {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--text-h);
+  }
+  .note, .warn {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  .note {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+  }
+  .warn {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { color: var(--text-h); }
+  footer {
+    text-align: center;
+    font-size: 13px;
+    color: var(--text);
+    padding: 24px 20px 40px;
+  }
+</style>
+</head>
+<body>
+
+<header class="top" id="top">
+  <h1>🚴 gpx-editor マニュアル</h1>
+  <p>GPXルートの読み込み・編集・ターンポイント作成・保存の使い方ガイド</p>
+</header>
+
+<div class="wrap">
+
+  <nav class="toc" aria-label="目次">
+    <h2>📖 目次</h2>
+    <ol>
+      <li><a href="#ch1">はじめに</a></li>
+      <li><a href="#ch2">クイックスタート</a></li>
+      <li><a href="#ch3">スタート画面</a></li>
+      <li><a href="#ch4">編集画面の基本操作</a></li>
+      <li><a href="#ch5">ターンポイント（曲がり角案内）</a></li>
+      <li><a href="#ch6">標高データの補正</a></li>
+      <li><a href="#ch7">実走行データの取り込み</a></li>
+      <li><a href="#ch8">元に戻す（Undo）</a></li>
+      <li><a href="#ch9">保存する</a></li>
+      <li><a href="#ch10">クラウド機能とログイン</a></li>
+      <li><a href="#ch11">困ったときは（FAQ）</a></li>
+      <li><a href="#ch12">用語集</a></li>
+    </ol>
+  </nav>
+
+  <section class="chapter" id="ch1">
+    <h2>1. はじめに</h2>
+    <p>
+      gpx-editorは、Stravaなどで作成・記録したGPXファイルに「ナビ用ターンポイント（曲がり角案内）」を追加して強化する、
+      または地図上をゼロからクリックして新規ルートを作成するためのルート編集ツールです。
+      作成したGPXは姉妹アプリ「gpx-navi」で読み込んで、ターンバイターンのナビゲーションに使えます。
+    </p>
+    <h3>主な機能</h3>
+    <ul>
+      <li>既存GPX（ルートデータ／実走行データ）の読み込みとターンポイント自動検出</li>
+      <li>実走行データに対するマップマッチング（道路への吸着）と間引き</li>
+      <li>地図クリックによる新規ルート作成・延伸・分岐編集</li>
+      <li>ターンポイントの手動追加・名称編集・削除</li>
+      <li>国土地理院APIによる標高補正（元データ標高との比較・選択）</li>
+      <li>交差点名・POI名の自動取得によるターンポイント命名</li>
+      <li>完成したGPXのダウンロード、およびクラウドへの保存・読み込み</li>
+    </ul>
+    <div class="note">
+      💡 ローカルファイルの読み込み・編集・ダウンロードはログイン不要で誰でも使えます。
+      クラウドから読み込むことも誰でも可能です。クラウドへの<strong>保存</strong>のみ、招待されたユーザー限定です（10章）。
+    </div>
+    <p>対応ブラウザ: Chrome / Edge / Safari / Firefox の最新版を推奨します。</p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch2">
+    <h2>2. クイックスタート</h2>
+    <ol>
+      <li><strong>ルートを用意する</strong> — 手持ちのGPXファイルを読み込むか、地図クリックで新規に作成する（3章）</li>
+      <li><strong>編集する</strong> — 地図上でルートを延伸・修正し、ターンポイント（曲がり角案内）を確認・調整する（4〜5章）</li>
+      <li><strong>保存する</strong> — 「💾 ルートを保存」からGPXをダウンロードする。必要ならクラウドにも保存する（9章）</li>
+    </ol>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch3">
+    <h2>3. スタート画面</h2>
+    <p>アプリを開くと最初に表示される画面です。ここでルートの入手方法を選びます。</p>
+
+    <h3>3-1. ローカルファイルからルートを読み込む</h3>
+    <p>「📂 ローカルからルートを選ぶ」から <code>.gpx</code> または <code>.xml</code> ファイルを選択します。読み込み前に、データの種類を選んでください。</p>
+    <ul>
+      <li><strong>🗺️ ルートデータ</strong>（Stravaのルート作成機能などで作った、道なりに正確なデータ）</li>
+      <li><strong>🏃 実走行データ</strong>（GPSで記録した走行ログ。位置ブレを含むため、読み込み時に自動でマップマッチング・間引きが行われます。7章参照）</li>
+    </ul>
+    <p>すでにターンポイント（曲がり角案内）が設定済みのGPXを読み込んだ場合は、その内容をそのまま尊重し、マップマッチングや標高補正・ターン自動検出は行いません。</p>
+
+    <h3>3-2. 新規ルートを作成する</h3>
+    <p>「🗺️ 新規ルートを作成する」を押すと、何もない状態の編集画面に入ります。地図をクリックしていくことでルートを延伸できます（4章）。</p>
+
+    <h3>3-3. クラウドからルートを選ぶ</h3>
+    <p>「☁️ クラウドからルートを選ぶ」から、過去にクラウドへ保存されたルート一覧を確認し、選んで読み込めます。ログイン不要で誰でも利用できます。</p>
+    <p>一覧には、ルート名・距離・獲得標高が表示されます。読み込みたいルートを選び、「読み込む →」を押すとダウンロードして編集画面へ進みます。</p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch4">
+    <h2>4. 編集画面の基本操作</h2>
+    <h3>画面構成</h3>
+    <ul>
+      <li>上部: ルート名・総距離・獲得標高の表示</li>
+      <li>左側: 地図と標高プロファイルグラフ</li>
+      <li>右側: ターンポイント一覧パネル（5章）</li>
+      <li>下部: 「💾 ルートを保存」ボタン</li>
+    </ul>
+    <p>「↩ 編集を破棄して戻る」ボタンでいつでもスタート画面に戻れます（確認ダイアログが出ます）。</p>
+
+    <h3>地図でのルート編集</h3>
+    <table>
+      <tr><th>操作</th><th>できること</th></tr>
+      <tr><td>ルート外の空白部分をクリック</td><td>ゴールをそこまで延長する（道なりに自動計算）</td></tr>
+      <tr><td>ルート線・既存の点の近くをクリック</td><td>「📍 ゴールを延長する」「⚓ アンカーポイントを挿入する」「🔀 ターンポイントを追加する」から選ぶメニューが出る</td></tr>
+      <tr><td>アンカーポイント（白丸）をドラッグ</td><td>その区間のルートを道なりに再計算しながら移動する</td></tr>
+      <tr><td>アンカーポイントを右クリック</td><td>削除の確認ポップアップが出る</td></tr>
+      <tr><td>ターンポイント（色付きの丸／ピン）を右クリック</td><td>削除の確認ポップアップが出る（trkpt自体は残り、アンカーとして機能し続ける）</td></tr>
+    </table>
+    <p>
+      地図の中心・ズームは操作するたびに記憶され、次にアプリを開いたときも維持されます。
+      標高グラフ上でカーソルを動かすと、対応する地図上の位置に矢印が表示され、逆に地図と標高の位置を相互に確認できます。
+    </p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch5">
+    <h2>5. ターンポイント（曲がり角案内）</h2>
+    <h3>自動検出</h3>
+    <p>
+      ルートを延伸・編集すると、進行方向が一定角度（既定45度）以上変わる地点を自動でターンポイント候補として検出し、
+      近くの交差点名を取得して名前を付けます。この処理はボタン操作なしでバックグラウンドに走ります。
+      「🔍 ターンポイント検出」ボタンで、任意のタイミングに手動で再実行することもできます（既存のターンポイントは上書きしません）。
+    </p>
+    <h3>手動での追加・編集・削除</h3>
+    <ul>
+      <li>地図上の候補点をクリックし、メニューから「🔀 ターンポイントを追加する」を選ぶと手動追加できます</li>
+      <li>右側の一覧パネルで、各ターンポイントの名前を直接編集できます（即座に反映されます）</li>
+      <li>一覧の🗑ボタン、または地図上での右クリックで削除できます</li>
+    </ul>
+    <h3>名前の付け方のコツ</h3>
+    <p>案内文言は自由記述ですが、姉妹アプリ「gpx-navi」で以下のように解釈されます。</p>
+    <ul>
+      <li>「左折」「やや左」「直進」「やや右」「右折」がおすすめの表現です</li>
+      <li>「左」「右」の文字を含めておくと、逆走時にも正しく変換されます</li>
+      <li>鍵カッコ「」で全体を括ると、スポット名として扱われます</li>
+      <li>漢字名称の読み方は、（）で括って指定できます</li>
+    </ul>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch6">
+    <h2>6. 標高データの補正</h2>
+    <p>各地点は「元データの標高」と「国土地理院による補正標高」の2種類を持てます。</p>
+    <ul>
+      <li><strong>元データ標高</strong> — 読み込んだGPXに含まれていた値（GPSやStravaなどの記録値）。局所的な異常値は自動で補正されます</li>
+      <li><strong>国土地理院補正標高</strong> — 日本国内のルートに対して、編集中バックグラウンドで自動取得される、地理院データに基づく標高値</li>
+    </ul>
+    <p>
+      国土地理院補正の対象は日本国内（おおよそ沖縄〜北海道の範囲）のみです。海外のルートではこの機能は無効になります。
+    </p>
+    <p>
+      保存画面（9章）で、上り・下りの勾配の暴れが少ない方が自動的におすすめとして選ばれます。ラジオボタンでいつでも切り替えられます。
+    </p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch7">
+    <h2>7. 実走行データの取り込み（マップマッチング）</h2>
+    <p>
+      GPSで記録した実走行ログは、道路から外れた位置ブレを含むことがあります。「🏃 実走行データ」として読み込むと、
+      自動的に点を間引いたうえで、道路に沿うよう座標を補正する「マップマッチング」処理が行われます。
+    </p>
+    <p>
+      処理中は「🗺️ マップマッチング中」の進捗ダイアログが表示されます。「⏹ キャンセル」でいつでも中断でき、
+      その時点までにマッチングできた部分結果がそのまま採用されます。
+    </p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch8">
+    <h2>8. 元に戻す（Undo）</h2>
+    <p>
+      ルートの延伸・移動・削除、ターンポイントの一括検出・削除などの操作は、右側パネルの「↩ 戻す」で直前の1回分だけ取り消せます。
+      2回以上前の状態には戻せないため、大きく編集する前は要注意です。
+    </p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch9">
+    <h2>9. 保存する</h2>
+    <p>編集画面の「💾 ルートを保存」から保存画面を開きます。開くと標高データの整合性チェックが自動で行われます。</p>
+    <h3>9-1. ローカルにダウンロード</h3>
+    <p>ファイル名を確認し、「💾 保存」を押すとブラウザ経由でGPXファイルがダウンロードされます（ファイル名は自動的に <code>_gne</code> が付きます）。</p>
+    <h3>9-2. クラウドに保存する（招待ユーザー限定）</h3>
+    <p>
+      「☁️ クラウドにも保存」にチェックを入れると、ダウンロードと同時にクラウドへもアップロードされます。
+      この機能はログインした招待ユーザーのみ利用できます（10章）。未ログインの場合はチェックボックスがグレーアウトします。
+    </p>
+    <p>ファイル名に日本語など2バイト文字が含まれる場合、クラウド保存用に半角英数字のファイル名を別途入力する必要があります。</p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch10">
+    <h2>10. クラウド機能とログイン</h2>
+    <p>
+      クラウドからの<strong>読み込み</strong>（3-3章）は誰でも利用できます。一方、クラウドへの<strong>保存</strong>（9-2章）は、
+      あらかじめ運営者に招待されたユーザーのみが利用できます。
+    </p>
+    <h3>ログイン方法</h3>
+    <ol>
+      <li>スタート画面右上の⚙️アイコンをクリックしてログインポップオーバーを開く</li>
+      <li>招待済みのメールアドレスを入力し、「ログインコードを送る」を押す</li>
+      <li>届いたメールに記載された8桁のコードを入力し、「ログイン」を押す</li>
+    </ol>
+    <p>ログイン中はメールアドレスが表示され、「ログアウト」でいつでもログアウトできます。</p>
+    <div class="note">
+      💡 メールのリンクではなくコードを手入力する方式です。リンクをクリックする必要はありません（メールアプリのリンク先読み機能でコードが無効化されるのを防ぐための仕様です）。
+    </div>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch11">
+    <h2>11. 困ったときは（FAQ）</h2>
+    <h3>Q. GPXファイルを読み込めない</h3>
+    <p>A. 拡張子が <code>.gpx</code> または <code>.xml</code> であること、ファイル内のトラック点が6点以上あることを確認してください。</p>
+    <h3>Q. 標高が一部「取得できない」表示のままになる</h3>
+    <p>A. 国土地理院APIへの問い合わせが失敗し続けている状態です。自動で再試行しますが、改善しない場合は再試行操作を試してください。ルートの編集自体は妨げられません。</p>
+    <h3>Q. 「☁️ クラウドにも保存」「☁️ クラウドからルートを選ぶ」が使えない</h3>
+    <p>A. クラウド保存は招待ユーザー限定の機能です。ログインしていない場合はチェックボックスがグレーアウトします（10章）。クラウドからの読み込みはログイン不要で利用できます。</p>
+    <h3>Q. 海外のルートで標高補正が効かない</h3>
+    <p>A. 国土地理院補正標高は日本国内のルート専用です。海外ルートでは元データ標高のみが使われます。</p>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+  <section class="chapter" id="ch12">
+    <h2>12. 用語集</h2>
+    <table>
+      <tr><th>用語</th><th>説明</th></tr>
+      <tr><td>GPX</td><td>GPS経路情報を保存するXML形式のファイル。ルートや走行ログの標準的なやり取りに使われる</td></tr>
+      <tr><td>ターンポイント（wpt）</td><td>曲がり角などの案内地点。名前・方向の情報を持つ</td></tr>
+      <tr><td>アンカーポイント（acpt）</td><td>ルート編集のつかみ手となる点。ドラッグや削除で経路を修正できる</td></tr>
+      <tr><td>マップマッチング</td><td>GPSログの位置ブレを、実際の道路に沿うよう自動補正する処理</td></tr>
+      <tr><td>国土地理院補正標高</td><td>国土地理院の標高データベースに基づいて取得・補正した標高値</td></tr>
+      <tr><td>gpx-navi</td><td>本アプリで作成したGPXを読み込んでターンバイターンナビゲーションを行う姉妹アプリ</td></tr>
+    </table>
+    <a class="back-to-top" href="#top">↑ 目次へ戻る</a>
+  </section>
+
+</div>
+
+<footer>gpx-editor マニュアル</footer>
+
+</body>
+</html>

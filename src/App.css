@@ -81,6 +81,24 @@ button.btn-secondary:hover:not(:disabled) {
   border-color: var(--accent-border);
 }
 
+a.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  border-radius: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-h);
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+a.btn-secondary:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
 button.btn-danger {
   background: var(--btn-danger-bg);
   color: #fff;
@@ -235,6 +253,9 @@ button.btn-danger.btn-icon:hover:not(:disabled) {
   position: absolute;
   top: 16px;
   right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .login-gear-btn {
@@ -250,6 +271,8 @@ button.btn-danger.btn-icon:hover:not(:disabled) {
   font-size: 1rem;
   cursor: pointer;
   line-height: 1;
+  color: inherit;
+  text-decoration: none;
 }
 
 .login-popover {

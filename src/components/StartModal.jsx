@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { isSupabaseConfigured } from '../lib/supabase.js'
 
 // spec.txt 3-4章: スタート画面の招待ユーザー向けログイン導線（⚙️アイコン→ポップオーバー）。
 // implement.txt 13章: メールクライアントのリンクプリフェッチでワンタイムリンクが
@@ -32,6 +33,15 @@ function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onVerifyOtp, onS
 
   return (
     <div className="login-popover-wrap">
+      <a
+        className="login-gear-btn"
+        href="/manual.html"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="マニュアルを開く"
+      >
+        📖
+      </a>
       <button
         type="button"
         className="login-gear-btn"
@@ -159,8 +169,8 @@ function StartModal({
                 type="button"
                 className="btn-primary"
                 onClick={onOpenNetworkPicker}
-                disabled={!isLoggedIn}
-                title={isLoggedIn ? undefined : '招待ユーザー限定の機能です'}
+                disabled={!isSupabaseConfigured()}
+                title={isSupabaseConfigured() ? undefined : 'Supabase未設定のため利用できません'}
               >
                 ☁️ クラウドからルートを選ぶ
               </button>

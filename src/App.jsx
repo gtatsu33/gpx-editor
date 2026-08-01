@@ -345,6 +345,9 @@ function App() {
             ↩ 編集を破棄して戻る
           </button>
         )}
+        <a className="btn-secondary" href="/manual.html" target="_blank" rel="noopener noreferrer">
+          📖 マニュアル
+        </a>
         {error && <span className="error">{error}</span>}
         {state.routePoints.length > 0 && (
           <span className="metric">
@@ -368,7 +371,6 @@ function App() {
         <NetworkPickerDialog
           onCancel={() => setShowNetworkDialog(false)}
           onLoaded={handleNetworkLoaded}
-          isLoggedIn={isLoggedIn}
         />
       )}
       {showSaveDialog && (

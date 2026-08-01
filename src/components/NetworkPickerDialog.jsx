@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { downloadGpx, listRoutes } from '../lib/supabase.js'
+import { downloadGpx, isSupabaseConfigured, listRoutes } from '../lib/supabase.js'
 
 function fmtDist(r) {
   return r.distance_m !== null && r.distance_m !== undefined ? `${(r.distance_m / 1000).toFixed(1)} km` : '---'
@@ -10,8 +10,10 @@ function fmtGain(r) {
 
 /**
  * ネットワークから読み込むダイアログ。spec.txt 3-3章。
+ * spec.txt 19章: クラウド読み込みは誰でも利用可（読み込み専用のRLSポリシーが
+ * anonロールに開放されているため）。クラウド保存のみ招待ユーザー限定。
  */
-export default function NetworkPickerDialog({ onCancel, onLoaded, isLoggedIn }) {
+export default function NetworkPickerDialog({ onCancel, onLoaded }) {
   const [routes, setRoutes] = useState(null)
   const [error, setError] = useState(null)
   const [selectedIdx, setSelectedIdx] = useState(null)
@@ -19,10 +21,10 @@ export default function NetworkPickerDialog({ onCancel, onLoaded, isLoggedIn }) 
   const [downloadError, setDownloadError] = useState(null)
 
   useEffect(() => {
-    // spec.txt 19章: 招待ユーザー限定機能。isLoggedInがfalseでこのダイアログが
-    // 開かれることは通常無い（呼び出し元のボタンが無効化されているため）が、
+    // 呼び出し元のボタンがSupabase未設定時は無効化されているため、通常は
+    // isSupabaseConfigured()がfalseでこのダイアログが開かれることは無いが、
     // 念のための防御的分岐。
-    if (!isLoggedIn) return undefined
+    if (!isSupabaseConfigured()) return undefined
     let cancelled = false
     listRoutes().then((result) => {
       if (cancelled) return
@@ -35,7 +37,7 @@ export default function NetworkPickerDialog({ onCancel, onLoaded, isLoggedIn }) 
     return () => {
       cancelled = true
     }
-  }, [isLoggedIn])
+  }, [])
 
   async function handleLoad() {
     if (selectedIdx === null) return
@@ -58,10 +60,9 @@ export default function NetworkPickerDialog({ onCancel, onLoaded, isLoggedIn }) 
       <div className="modal-box network-picker">
         <h3>☁️ ネットワークから読み込む</h3>
 
-        {!isLoggedIn && <p className="error">招待ユーザー限定の機能です。ログインしてください。</p>}
-        {isLoggedIn && error && <p className="error">取得に失敗しました: {error}</p>}
-        {isLoggedIn && !error && routes === null && <p>ルート一覧を取得中…</p>}
-        {isLoggedIn && !error && routes && routes.length === 0 && <p>ネットワーク上にルートがありません。</p>}
+        {error && <p className="error">取得に失敗しました: {error}</p>}
+        {!error && routes === null && <p>ルート一覧を取得中…</p>}
+        {!error && routes && routes.length === 0 && <p>ネットワーク上にルートがありません。</p>}
 
         {!error && routes && routes.length > 0 && (
           <ul className="network-route-list">

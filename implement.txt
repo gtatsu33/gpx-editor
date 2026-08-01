@@ -676,13 +676,17 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
       {{ .Token }}（8桁コード）のみを案内する内容に書き換える
       （リンクが残っていると、そちらがプリフェッチされてコードごと
       無効化されてしまうため）
-    - RLSポリシーを、route_filesテーブルのINSERT/SELECT、gpx_routes
-      バケットのupload/downloadともに、`anon`ロール許可から
-      `authenticated`ロール許可（auth.uid() IS NOT NULL）に変更する
-      【重要・要対応】この変更により、同一Supabaseプロジェクトを
-      anonキーで読み書きしているiOSアプリ（ios/）は、Supabase Auth
-      対応するまで一時的にクラウド機能が使えなくなる（合意済み、
-      iOS側の対応は別途後日行う）
+    - RLSポリシーを、書き込み系（route_filesテーブルのINSERT、
+      gpx_routesバケットのupload）のみ`anon`ロール許可から
+      `authenticated`ロール許可（auth.uid() IS NOT NULL）に変更する。
+      読み取り系（route_filesテーブルのSELECT、gpx_routesバケットの
+      download）はspec.txt 19章の通りクラウド読み込みが誰でも利用可能な
+      仕様のため、`anon`ロールへの許可を維持する
+      【対応済み・2026-08-01】書き込み系のRLSを`authenticated`ロール限定に
+      変更済み。この変更により、同一Supabaseプロジェクトをanonキーで
+      書き込みしているiOSアプリ（ios/）は、Supabase Auth対応するまで
+      一時的にクラウド保存機能が使えなくなる（合意済み、iOS側の対応は
+      別途後日行う）。読み込みはiOS側含め引き続きanonキーのまま利用可能
 
   - lib/supabase.js に追加する関数:
     - sendMagicLink(email): supabase.auth.signInWithOtp({ email }) を
@@ -699,8 +703,9 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
       onAuthStateChangeを購読する
     - { user, loading, sendMagicLink, verifyOtp, signOut } を返す
 
-  - App.jsx: useAuth()を呼び出し、isLoggedIn相当の値をStartModal・
-    SaveDialogにpropsで渡す
+  - App.jsx: useAuth()を呼び出し、isLoggedIn相当の値をStartModal（ログイン
+    ポップオーバー用）・SaveDialogにpropsで渡す。NetworkPickerDialogは
+    クラウド読み込みが誰でも利用可能なためisLoggedInを渡さない
 
   - StartModal.jsx: 右上に⚙️アイコンを追加する（spec.txt 3-4章）。
     クリックでポップオーバーを開閉する。未ログイン時は2ステップUIとする:
@@ -709,17 +714,23 @@ spec.txt 19章の「招待制クラウド機能」を、Supabase Authのメー�
     2. 8桁コード入力欄＋「ログイン」ボタンを表示。verifyOtpを呼んで
        検証する（「戻る」でメールアドレス入力に戻れる）
     ログイン中はログイン中のメールアドレス表示＋「ログアウト」ボタンを表示する。
-    「☁️ クラウドからルートを選ぶ」ボタンは、isLoggedInがfalseの間
-    disabled属性を付与し、title属性またはツールチップで
-    「招待ユーザー限定の機能です」と案内する
+    「☁️ クラウドからルートを選ぶ」ボタンは、isLoggedInではなく
+    isSupabaseConfigured()がfalseの間disabled属性を付与し、title属性で
+    「Supabase未設定のため利用できません」と案内する
+    【2026-08-01更新】クラウド読み込みは招待制の対象外（誰でも利用可）に
+    変更したため、ログイン状態でのゲートを撤廃した
 
-  - SaveDialog.jsx:「☁️ クラウドにも保存」チェックボックスのdisabled条件に
-    既存の`!isSupabaseConfigured()`へ`|| !isLoggedIn`を追加する。ラベル脇の
-    注記も、未設定時のメッセージと未ログイン時のメッセージを出し分ける
+  - SaveDialog.jsx:「☁️ クラウドにも保存」チェックボックスのdisabled条件は
+    `!isSupabaseConfigured() || !isLoggedIn`のまま維持する（クラウド保存は
+    引き続き招待ユーザー限定）
 
-  - NetworkPickerDialog.jsx: 念のため、isLoggedInがfalseの場合は
-    開かれても即座にエラー表示して閉じる導線を用意する（App.jsx側で
-    そもそも開かせない実装になっていれば通常到達しない防御的分岐）
+  - NetworkPickerDialog.jsx: isLoggedInの分岐は持たない。念のため、
+    isSupabaseConfigured()がfalseの場合はlistRoutes()を呼ばない防御的
+    分岐のみ用意する（App.jsx側でそもそも開かせない実装になっていれば
+    通常到達しない）
+    【2026-08-01更新】従来はisLoggedInがfalseの場合にlistRoutes()を
+    呼ばずエラー表示していたが、クラウド読み込みが誰でも利用可能になった
+    ため撤廃した
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
