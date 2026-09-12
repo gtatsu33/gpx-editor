@@ -4,7 +4,6 @@ import { isSupabaseConfigured } from '../lib/supabase.js'
 // spec.txt 3-4章: スタート画面の招待ユーザー向けログイン導線（⚙️アイコン→ポップオーバー）。
 // implement.txt 13章: メールクライアントのリンクプリフェッチでワンタイムリンクが
 // 無効化される問題を避けるため、リンククリックではなく8桁コード手入力方式を使う。
-// 無効化される問題を避けるため、リンククリックではなく8桁コード手入力方式を使う。
 function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onVerifyOtp, onSignOut }) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
@@ -79,7 +78,6 @@ function LoginPopover({ isLoggedIn, userEmail, onSendMagicLink, onVerifyOtp, onS
             </>
           ) : (
             <>
-              <p>メールに届いた8桁のコードを入力してください。</p>
               <p>メールに届いた8桁のコードを入力してください。</p>
               <input
                 type="text"

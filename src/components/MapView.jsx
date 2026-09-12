@@ -164,7 +164,7 @@ const MapView = forwardRef(function MapView(
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
-        'routing by <a href="https://project-osrm.org/">OSRM</a>',
+        'routing by <a href="https://valhalla.github.io/valhalla/">Valhalla</a>',
       maxZoom: 19,
     }).addTo(map)
 
