@@ -55,6 +55,16 @@ describe('routeReducer', () => {
       const oldGoalPoint = next.routePoints[4]
       expect(oldGoalPoint.wpt).toBeNull()
     })
+
+    it('useRouting=falseを新しい末尾acptに設定する（2026-09-13追加）', () => {
+      const state = baseFivePointRoute()
+      const next = routeReducer(state, {
+        type: 'EXTEND',
+        payload: { segmentPoints: [[35.004, 139.0], [35.005, 139.0]], useRouting: false },
+      })
+      const last = next.routePoints[next.routePoints.length - 1]
+      expect(last.useRouting).toBe(false)
+    })
   })
 
   describe('ACPT_DRAG_END（8-2・Undo対象）', () => {
@@ -144,6 +154,38 @@ describe('routeReducer', () => {
       })
       expect(next.routePoints).toHaveLength(5)
       expect(next.routePoints[1]).toMatchObject({ isAcpt: true })
+    })
+  })
+
+  describe('ACPT_TOGGLE_ROUTING（8-8・Undo対象・2026-09-13追加）', () => {
+    it('中間acptのuse_routingを反転し、前後区間を再計算結果で置き換える', () => {
+      const state = baseFivePointRoute()
+      const next = routeReducer(state, {
+        type: 'ACPT_TOGGLE_ROUTING',
+        payload: {
+          acptIndex: 1,
+          newUseRouting: false,
+          backwardSegment: [[35.0, 139.0], [35.002, 139.0]],
+          forwardSegment: [[35.002, 139.0], [35.004, 139.0]],
+        },
+      })
+      expect(next.routePoints).toHaveLength(3)
+      expect(next.routePoints[1]).toMatchObject({ isAcpt: true, useRouting: false })
+      expect(next.undoSnapshot).toEqual(state.routePoints)
+    })
+
+    it('先頭acptを反転すると前方区間は変更せず後方のみ再計算する', () => {
+      const state = baseFivePointRoute()
+      const next = routeReducer(state, {
+        type: 'ACPT_TOGGLE_ROUTING',
+        payload: {
+          acptIndex: 0,
+          newUseRouting: false,
+          backwardSegment: null,
+          forwardSegment: [[35.0, 139.0], [35.002, 139.0]],
+        },
+      })
+      expect(next.routePoints[0]).toMatchObject({ isAcpt: true, useRouting: false, wpt: { name: 'スタート', delta: null } })
     })
   })
 

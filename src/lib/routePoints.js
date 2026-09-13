@@ -2,9 +2,17 @@
 export function makeRoutePoint(
   lat,
   lon,
-  { eleOrg = null, eleFix = null, isAcpt = false, wpt = null, changed = true } = {}
+  { eleOrg = null, eleFix = null, isAcpt = false, wpt = null, changed = true, useRouting = true } = {}
 ) {
-  return { lat, lon, eleOrg, eleFix, isAcpt, wpt, changed }
+  return { lat, lon, eleOrg, eleFix, isAcpt, wpt, changed, useRouting }
+}
+
+/**
+ * 2点間の区間を「ルート検索する」か「直線で結ぶ」か。spec.txt 5-2章
+ * （2026-09-13追加）: 両端のuse_routingが共にtrueの場合のみルート検索する。
+ */
+export function shouldRoute(a, b) {
+  return a.useRouting !== false && b.useRouting !== false
 }
 
 export function deepCopyRoutePoints(rp) {

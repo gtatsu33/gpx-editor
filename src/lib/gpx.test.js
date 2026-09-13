@@ -58,6 +58,25 @@ describe('gpx.js', () => {
     expect(reparsed.waypoints[1].desc).toBe('bearing_change:90.0')
   })
 
+  it('buildGpx/parseGpxがgpxnavi:use_routing="0"を往復できる（2026-09-13追加）', () => {
+    const routePoints = [
+      { lat: 35.0, lon: 139.0, eleOrg: 10, eleFix: 11, isAcpt: true, wpt: { name: 'スタート', delta: null }, useRouting: true },
+      { lat: 35.001, lon: 139.0, eleOrg: 12, eleFix: 13, isAcpt: false, wpt: null, useRouting: true },
+      {
+        lat: 35.002,
+        lon: 139.0,
+        eleOrg: 14,
+        eleFix: 15,
+        isAcpt: true,
+        wpt: { name: '目的地', delta: null },
+        useRouting: false,
+      },
+    ]
+    const xml = buildGpx({ baseXmlString: null, routePoints, eleChoice: 'org', routeName: 'new_route' })
+    const reparsed = parseGpx(xml)
+    expect(reparsed.noRoutingIndices).toEqual(new Set([2]))
+  })
+
   it('parseGpxがtrk/extensions/gpxnavi:eleSource="gsi"を読み取る', () => {
     const gsiGpx = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" xmlns="${GPX_NS}" xmlns:gpxnavi="${GPXNAVI_NS}">

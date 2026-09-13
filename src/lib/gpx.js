@@ -29,11 +29,15 @@ export function parseGpx(xmlString) {
   })
 
   const acptIndices = new Set()
+  const noRoutingIndices = new Set()
   trkptEls.forEach((el, i) => {
     const ext = el.getElementsByTagNameNS(GPX_NS, 'extensions')[0]
     if (!ext) return
     const acptEl = ext.getElementsByTagNameNS(GPXNAVI_NS, 'acpt')[0]
     if (acptEl && textOf(acptEl) === '1') acptIndices.add(i)
+    // spec.txt 5-4章（2026-09-13追加）: ルート検索OFFのacptのみ出力される
+    const useRoutingEl = ext.getElementsByTagNameNS(GPXNAVI_NS, 'use_routing')[0]
+    if (useRoutingEl && textOf(useRoutingEl) === '0') noRoutingIndices.add(i)
   })
 
   const wptEls = Array.from(doc.getElementsByTagNameNS(GPX_NS, 'wpt'))
@@ -60,6 +64,7 @@ export function parseGpx(xmlString) {
     waypoints,
     hasWpts: waypoints.length > 0,
     acptIndices,
+    noRoutingIndices,
     trackName: trkNameEl ? textOf(trkNameEl) : null,
     eleSourceGsi,
   }
@@ -124,6 +129,12 @@ export function buildGpx({ baseXmlString, routePoints, eleChoice = 'org', routeN
       const acptEl = doc.createElementNS(GPXNAVI_NS, 'gpxnavi:acpt')
       acptEl.textContent = '1'
       extEl.appendChild(acptEl)
+      // spec.txt 5-4章（2026-09-13追加）: ルート検索OFFのacptのみ出力する
+      if (p.useRouting === false) {
+        const useRoutingEl = doc.createElementNS(GPXNAVI_NS, 'gpxnavi:use_routing')
+        useRoutingEl.textContent = '0'
+        extEl.appendChild(useRoutingEl)
+      }
       trkptEl.appendChild(extEl)
     }
     trksegEl.appendChild(trkptEl)

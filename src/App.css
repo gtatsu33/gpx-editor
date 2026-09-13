@@ -374,6 +374,16 @@ button.btn-danger.btn-icon:hover:not(:disabled) {
   min-height: 0;
 }
 
+.routing-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
 .list-col {
   flex: 1;
   min-width: 260px;

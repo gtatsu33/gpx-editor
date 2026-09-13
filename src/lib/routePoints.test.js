@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contiguousRanges, deepCopyRoutePoints, makeRoutePoint, nextBoundary, prevBoundary } from './routePoints.js'
+import { contiguousRanges, deepCopyRoutePoints, makeRoutePoint, nextBoundary, prevBoundary, shouldRoute } from './routePoints.js'
 
 describe('routePoints.js', () => {
   it('makeRoutePointがデフォルト値を持つ', () => {
@@ -11,7 +11,17 @@ describe('routePoints.js', () => {
       isAcpt: false,
       wpt: null,
       changed: true,
+      useRouting: true,
     })
+  })
+
+  it('shouldRouteが両端のuse_routingが共にtrueの場合のみtrueを返す', () => {
+    const on = { useRouting: true }
+    const off = { useRouting: false }
+    expect(shouldRoute(on, on)).toBe(true)
+    expect(shouldRoute(on, off)).toBe(false)
+    expect(shouldRoute(off, on)).toBe(false)
+    expect(shouldRoute(off, off)).toBe(false)
   })
 
   it('deepCopyRoutePointsがwptも含めて独立コピーする', () => {

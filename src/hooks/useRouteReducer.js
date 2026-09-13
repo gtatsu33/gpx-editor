@@ -16,13 +16,15 @@ import { combineTurnName } from '../lib/turns.js'
  * spec.txt 6章。LOAD_PARSED_GPX（ルートデータ）・LOAD_MATCHED_ROUTE
  * （実走行データ、マップマッチング後）の両方から使う共通ロジック。
  */
-function buildInitialRoutePoints(points, elevations, waypoints, acptIndices, turnAssignments, eleSourceGsi) {
+function buildInitialRoutePoints(points, elevations, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices) {
   const useExtensionAcpts = acptIndices && acptIndices.size >= 2
   const rp = points.map(([lat, lon], i) =>
     makeRoutePoint(lat, lon, {
       eleOrg: elevations[i] ?? null,
       isAcpt: useExtensionAcpts ? acptIndices.has(i) : i === 0 || i === points.length - 1,
       changed: false,
+      // spec.txt 5-4章（2026-09-13追加）: gpxnavi:use_routing="0"の復元
+      useRouting: !(noRoutingIndices && noRoutingIndices.has(i)),
     })
   )
 
@@ -123,7 +125,7 @@ export function routeReducer(state, action) {
 
     // 8-1（後半）: acptが既に存在する場合のゴール延伸。Undo対象
     case 'EXTEND': {
-      const { segmentPoints } = action.payload
+      const { segmentPoints, useRouting = true } = action.payload
       const rp = [...state.routePoints]
       const undoSnapshot = withUndoSnapshot(state)
       if (rp.length && rp[rp.length - 1].wpt && rp[rp.length - 1].wpt.name === '目的地') {
@@ -136,6 +138,7 @@ export function routeReducer(state, action) {
           ...newPts[newPts.length - 1],
           wpt: { name: '目的地', delta: null },
           changed: false,
+          useRouting,
         }
       }
       return { ...state, routePoints: [...rp, ...newPts], undoSnapshot, routeModified: true }
@@ -151,6 +154,9 @@ export function routeReducer(state, action) {
       const trkptIdx = allAcpts[acptIndex]
       const isFirst = acptIndex === 0
       const isLast = acptIndex === allAcpts.length - 1
+      // spec.txt 5-1章（2026-09-13追加）: ドラッグでは座標のみ変わり、
+      // use_routingフラグ自体は維持する
+      const draggedUseRouting = rp[trkptIdx].useRouting
       let newRp
 
       if (isFirst) {
@@ -158,7 +164,7 @@ export function routeReducer(state, action) {
         const head = forwardSegment.slice(0, -1)
         const newPts = head.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === 0, changed: true }))
         if (newPts.length) {
-          newPts[0] = { ...newPts[0], wpt: { name: 'スタート', delta: null }, changed: false }
+          newPts[0] = { ...newPts[0], wpt: { name: 'スタート', delta: null }, changed: false, useRouting: draggedUseRouting }
         }
         newRp = [...newPts, ...rp.slice(nxtIdx)]
       } else if (isLast) {
@@ -170,6 +176,7 @@ export function routeReducer(state, action) {
             ...newPts[newPts.length - 1],
             wpt: { name: '目的地', delta: null },
             changed: false,
+            useRouting: draggedUseRouting,
           }
         }
         newRp = [...rp.slice(0, prevIdx + 1), ...newPts]
@@ -181,7 +188,7 @@ export function routeReducer(state, action) {
         const newPts = [...bwdTail, ...fwdMid]
         const acptPos = bwdTail.length - 1
         if (acptPos >= 0 && acptPos < newPts.length) {
-          newPts[acptPos] = { ...newPts[acptPos], isAcpt: true }
+          newPts[acptPos] = { ...newPts[acptPos], isAcpt: true, useRouting: draggedUseRouting }
         }
         newRp = [...rp.slice(0, prevIdx + 1), ...newPts, ...rp.slice(nxtIdx)]
       }
@@ -240,7 +247,7 @@ export function routeReducer(state, action) {
 
     // 8-4: アンカーポイントの挿入。Undo対象
     case 'INSERT_ACPT': {
-      const { trkptIndex, backwardSegment, forwardSegment } = action.payload
+      const { trkptIndex, backwardSegment, forwardSegment, useRouting = true } = action.payload
       const rp = [...state.routePoints]
       const undoSnapshot = withUndoSnapshot(state)
       const prevIdx = prevBoundary(trkptIndex, rp)
@@ -250,9 +257,43 @@ export function routeReducer(state, action) {
       const newPts = [...seg1Tail, ...seg2Mid]
       const newAcptPos = seg1Tail.length - 1
       if (newAcptPos >= 0 && newAcptPos < newPts.length) {
-        newPts[newAcptPos] = { ...newPts[newAcptPos], isAcpt: true }
+        newPts[newAcptPos] = { ...newPts[newAcptPos], isAcpt: true, useRouting }
       }
       const newRp = [...rp.slice(0, prevIdx + 1), ...newPts, ...rp.slice(nxtIdx)]
+      return { ...state, routePoints: newRp, undoSnapshot, routeModified: true }
+    }
+
+    // 8-8: ルート検索ON/OFFの切替。Undo対象（2026-09-13追加）
+    case 'ACPT_TOGGLE_ROUTING': {
+      const { acptIndex, newUseRouting, backwardSegment, forwardSegment } = action.payload
+      const rp = [...state.routePoints]
+      const allAcpts = findAcptIndices(rp)
+      if (acptIndex < 0 || acptIndex >= allAcpts.length) return state
+      const undoSnapshot = withUndoSnapshot(state)
+      const trkptIdx = allAcpts[acptIndex]
+      const isFirst = acptIndex === 0
+      const isLast = acptIndex === allAcpts.length - 1
+      const centerPoint = { ...rp[trkptIdx], useRouting: newUseRouting, changed: false }
+      let newRp
+
+      if (isFirst && isLast) {
+        newRp = [centerPoint]
+      } else if (isFirst) {
+        const nxtIdx = nextBoundary(trkptIdx, rp)
+        const fwdMid = forwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        newRp = [centerPoint, ...fwdMid, ...rp.slice(nxtIdx)]
+      } else if (isLast) {
+        const prevIdx = prevBoundary(trkptIdx, rp)
+        const bwdMid = backwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        newRp = [...rp.slice(0, prevIdx + 1), ...bwdMid, centerPoint]
+      } else {
+        const prevIdx = prevBoundary(trkptIdx, rp)
+        const nxtIdx = nextBoundary(trkptIdx, rp)
+        const bwdMid = backwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        const fwdMid = forwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        newRp = [...rp.slice(0, prevIdx + 1), ...bwdMid, centerPoint, ...fwdMid, ...rp.slice(nxtIdx)]
+      }
+
       return { ...state, routePoints: newRp, undoSnapshot, routeModified: true }
     }
 
@@ -368,10 +409,10 @@ export function routeReducer(state, action) {
     // 結果（spec.txt 6章・11章・12章、非同期のOverpass呼び出しを伴うため
     // reducerの外で計算する）。
     case 'LOAD_PARSED_GPX': {
-      const { trkpts, waypoints, acptIndices, turnAssignments, eleSourceGsi } = action.payload
+      const { trkpts, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices } = action.payload
       const points = trkpts.map((t) => [t.lat, t.lon])
       const elevations = trkpts.map((t) => t.ele)
-      const { rp, gradeOrg, gradeFix } = buildInitialRoutePoints(points, elevations, waypoints, acptIndices, turnAssignments, eleSourceGsi)
+      const { rp, gradeOrg, gradeFix } = buildInitialRoutePoints(points, elevations, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices)
       return { ...state, routePoints: rp, undoSnapshot: null, routeModified: false, gradeOrg, gradeFix }
     }
 
@@ -379,8 +420,8 @@ export function routeReducer(state, action) {
     // 呼び出し側（App.jsx）でRDP間引き→マップマッチングまで完了させ、
     // マッチング後の座標列と、間引き前インデックスで対応付けた元標高を渡す。
     case 'LOAD_MATCHED_ROUTE': {
-      const { matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi } = action.payload
-      const { rp, gradeOrg, gradeFix } = buildInitialRoutePoints(matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi)
+      const { matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices } = action.payload
+      const { rp, gradeOrg, gradeFix } = buildInitialRoutePoints(matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices)
       return { ...state, routePoints: rp, undoSnapshot: null, routeModified: false, gradeOrg, gradeFix }
     }
 

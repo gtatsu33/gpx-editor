@@ -523,6 +523,51 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     キャンセル・タイムアウトはAbortController + チャンク間のキャンセル
     フラグチェックで実装する。
 
+  ルート検索ON/OFF（spec.txt 5-1・5-2・8-8・9章、2026-09-13追加）:
+    RoutePointに use_routing（bool、既定true）を追加（lib/routePoints.js
+    makeRoutePoint）。区間のルート検索要否判定は
+    lib/routePoints.js の shouldRoute(a, b)（両端のuse_routingが
+    共にtrueの場合のみtrue）に集約した。
+
+    App.jsx に segmentBetween(ptA, ptB) ヘルパーを追加。
+    shouldRoute(ptA, ptB) がfalseならcalcRouteSegmentを呼ばず
+    [[ptA.lat,ptA.lon],[ptB.lat,ptB.lon]] を直接返す（＝ルーティングAPIを
+    呼ばない）。8章の各ハンドラ（isExtend／acpt_drag_end／acpt_delete／
+    dialog_result(acpt)）は、既存のcalcRouteSegment直接呼び出しを
+    全てsegmentBetween経由に置き換えた。新規acptを生成する箇所
+    （isExtend、dialog_result(acpt)）では、その時点のuseRoutingDefault
+    （4章のトグルのReact state、App.jsx）を新規点のuseRoutingとして使う。
+
+    新規イベント acpt_toggle_routing（MapView.jsxのacptマーカー左クリック
+    メニューから発火）を追加。App.jsx側で対象acptのuse_routingを反転させ、
+    前方・後方の境界点との区間をsegmentBetweenで再計算してから
+    ACPT_TOGGLE_ROUTINGをdispatchする（8-8章）。reducer側
+    （useRouteReducer.js）は、ACPT_DRAG_ENDの中間acpt移動と同じ
+    「backwardSegment.slice(1,-1) + centerPoint + forwardSegment.slice(1,-1)」
+    パターンで区間を置換する（座標は変えず、use_routingとその前後の
+    trkpt列だけを更新する点がACPT_DRAG_ENDとの違い）。
+
+    GPX永続化: lib/gpx.js のparseGpx/buildGpxに
+    gpxnavi:use_routing="0" 拡張タグの読み書きを追加（5-4章）。
+    parseGpxはnoRoutingIndices（Set）を返し、
+    useRouteReducer.jsのbuildInitialRoutePointsで
+    「そのindexがuseRouting=falseのacptとして復元される」形で消費する。
+
+    UI: App.jsxのmap-col内、MapView直上に
+    「🧭 新規ポイントのルート検索: ON/OFF」チェックボックス
+    （useRoutingDefault state）を配置。仕様通りローカルストレージ等には
+    保存せず、loadGpxText/handleNewRoute/handleDiscardConfirmedの
+    タイミングで常にtrueへリセットする。
+
+    MapView.jsx: acptIcon(useRouting)でuseRouting=falseの場合のみ
+    オレンジ枠にする。トラックラインは1本のpolylineではなく、
+    App.jsx側でacptまたはwpt境界ごとに分割したtrkptSegments
+    （{points, routed}[]）を受け取り、routed=falseの区間のみ
+    dashArray="6 6"で破線描画する（7-1章）。acptマーカーに新たに
+    click ハンドラを追加し、「🔀 ルート検索をON/OFFに切り替える」
+    「🗑 削除する」「✖ キャンセル」のアクションメニューを表示する
+    （7-2/7-4章）。
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 9. RDP間引きの実装方針

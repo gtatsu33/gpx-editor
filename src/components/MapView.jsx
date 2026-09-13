@@ -15,9 +15,11 @@ function pinIcon(color, label) {
   return L.divIcon({ html: svg, iconSize: [26, 38], iconAnchor: [13, 38], className: '' })
 }
 
-function acptIcon() {
+function acptIcon(useRouting) {
+  // spec.txt 7-1章（2026-09-13追加）: ルート検索OFFのacptはオレンジ枠にする
+  const borderColor = useRouting === false ? '#e67e22' : '#2c3e50'
   return L.divIcon({
-    html: '<div style="width:14px;height:14px;border-radius:50%;background:white;border:2px solid #2c3e50;box-sizing:border-box;"></div>',
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:white;border:2px solid ${borderColor};box-sizing:border-box;"></div>`,
     iconSize: [14, 14],
     iconAnchor: [7, 7],
     className: '',
@@ -64,18 +66,18 @@ function openActionPopup(map, latlng, items) {
  * （implement.txt 6章の方針）。
  */
 const MapView = forwardRef(function MapView(
-  { trkpts, acpts, wpts, center, zoom, onEvent, focusCenter, hoveredKm },
+  { trkpts, trkptSegments, acpts, wpts, center, zoom, onEvent, focusCenter, hoveredKm },
   ref
 ) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const layersRef = useRef([])
   const cursorMarkerRef = useRef(null)
-  const dataRef = useRef({ trkpts, acpts, wpts, onEvent })
+  const dataRef = useRef({ trkpts, trkptSegments, acpts, wpts, onEvent })
   const draggingRef = useRef(false)
 
   useEffect(() => {
-    dataRef.current = { trkpts, acpts, wpts, onEvent }
+    dataRef.current = { trkpts, trkptSegments, acpts, wpts, onEvent }
   })
 
   function emitEvent(payload) {
@@ -209,14 +211,22 @@ const MapView = forwardRef(function MapView(
       layersRef.current.push(layer)
     }
 
-    if (trkpts.length > 1) {
-      const poly = L.polyline(trkpts, { color: '#3498db', weight: 4, opacity: 0.8 })
+    // spec.txt 7-1章（2026-09-13追加）: ルート検索OFFの区間（直線）は破線で
+    // 描画し、ルート検索された区間（実線）と視覚的に区別する
+    const segments = trkptSegments && trkptSegments.length ? trkptSegments : trkpts.length > 1 ? [{ points: trkpts, routed: true }] : []
+    segments.forEach((seg) => {
+      const poly = L.polyline(seg.points, {
+        color: '#3498db',
+        weight: 4,
+        opacity: 0.8,
+        dashArray: seg.routed ? null : '6 6',
+      })
       poly.on('click', (e) => {
         L.DomEvent.stopPropagation(e)
         handleCandidateOrMenu(e.latlng.lat, e.latlng.lng, trkpts, wpts)
       })
       addLayer(poly)
-    }
+    })
 
     wpts.forEach((w, i) => {
       let marker
@@ -257,9 +267,11 @@ const MapView = forwardRef(function MapView(
     })
 
     acpts.forEach((a, i) => {
-      const marker = L.marker([a.lat, a.lng], { icon: acptIcon(), draggable: true, zIndexOffset: 500 }).bindTooltip(
-        `acpt:${i + 1}（右クリックで削除確認）`
-      )
+      const marker = L.marker([a.lat, a.lng], {
+        icon: acptIcon(a.useRouting),
+        draggable: true,
+        zIndexOffset: 500,
+      }).bindTooltip(`acpt:${i + 1}${a.useRouting === false ? '（ルート検索OFF）' : ''}（右クリックで削除確認）`)
       marker.on('dragstart', () => {
         draggingRef.current = true
       })
@@ -267,6 +279,17 @@ const MapView = forwardRef(function MapView(
         draggingRef.current = false
         const pos = e.target.getLatLng()
         emitEvent({ type: 'acpt_drag_end', acptIdx: i, lat: pos.lat, lng: pos.lng })
+      })
+      // spec.txt 7-2/7-4章（2026-09-13追加）: acptマーカークリックで
+      // ルート検索ON/OFF切替・削除のアクションメニューを表示する
+      marker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e)
+        const label = a.useRouting === false ? '🔀 ルート検索をONに切り替える' : '🔀 ルート検索をOFFに切り替える'
+        openActionPopup(map, e.latlng, [
+          { label, onClick: () => emitEvent({ type: 'acpt_toggle_routing', acptIdx: i }) },
+          { label: '🗑 削除する', onClick: () => emitEvent({ type: 'acpt_delete', acptIdx: i }) },
+          { label: '✖ キャンセル', onClick: () => {} },
+        ])
       })
       marker.on('contextmenu', (e) => {
         L.DomEvent.stopPropagation(e)
@@ -278,7 +301,7 @@ const MapView = forwardRef(function MapView(
       })
       addLayer(marker)
     })
-  }, [trkpts, acpts, wpts])
+  }, [trkpts, trkptSegments, acpts, wpts])
 
   // 標高グラフhover位置に対応するカーソル矢印。spec.txt 7-3章
   useEffect(() => {

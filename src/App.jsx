@@ -15,7 +15,7 @@ import { useAuth } from './hooks/useAuth.js'
 import { parseGpx } from './lib/gpx.js'
 import { haversine } from './lib/geo.js'
 import { combineTurnName, detectTurns, wptStyle } from './lib/turns.js'
-import { contiguousRanges, nextBoundary, prevBoundary } from './lib/routePoints.js'
+import { contiguousRanges, nextBoundary, prevBoundary, shouldRoute } from './lib/routePoints.js'
 import { rdpSimplify } from './lib/rdp.js'
 import { calcRouteSegment } from './lib/routing.js'
 import { fetchIntersectionNames, fetchSpotName } from './lib/overpass.js'
@@ -43,6 +43,9 @@ function App() {
   const [showNetworkDialog, setShowNetworkDialog] = useState(false)
   const [started, setStarted] = useState(false)
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+  // spec.txt 4章（2026-09-13追加）: 新規acptのルート検索デフォルト値。
+  // 保持しない仕様のため、編集画面を開くたび常にtrueで始まる
+  const [useRoutingDefault, setUseRoutingDefault] = useState(true)
   const mapViewRef = useRef(null)
   const { status: eleStatus, retryFailed: retryEleFailed } = useElevationBackground(state.routePoints, dispatch)
   const { status: turnStatus } = useTurnDetectionBackground(state.routePoints, dispatch)
@@ -64,7 +67,7 @@ function App() {
   }
 
   async function loadGpxText(text, filename, isActualRide) {
-    const { trkpts, waypoints, acptIndices, eleSourceGsi, trackName: parsedTrackName } = parseGpx(text)
+    const { trkpts, waypoints, acptIndices, noRoutingIndices, eleSourceGsi, trackName: parsedTrackName } = parseGpx(text)
     if (trkpts.length < 6) {
       setError('トラックポイントが少なすぎます。')
       return
@@ -74,6 +77,7 @@ function App() {
     setGpxFilename(filename.replace(/\.(gpx|xml)$/i, '').replace(/_gne$/i, ''))
     setTrackName(parsedTrackName || null)
     setEleSourceGsi(eleSourceGsi)
+    setUseRoutingDefault(true)
 
     const hasWpts = waypoints.length > 0
     let finalPoints
@@ -87,16 +91,16 @@ function App() {
       const turnAssignments = await detectAndNameTurns(matchedPoints)
       dispatch({
         type: 'LOAD_MATCHED_ROUTE',
-        payload: { matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi },
+        payload: { matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices },
       })
       finalPoints = matchedPoints
     } else if (!hasWpts) {
       const points = trkpts.map((t) => [t.lat, t.lon])
       const turnAssignments = await detectAndNameTurns(points)
-      dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, turnAssignments, eleSourceGsi } })
+      dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices } })
       finalPoints = points
     } else {
-      dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, eleSourceGsi } })
+      dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, eleSourceGsi, noRoutingIndices } })
       finalPoints = trkpts.map((t) => [t.lat, t.lon])
     }
     setStarted(true)
@@ -131,6 +135,7 @@ function App() {
   function handleNewRoute() {
     setTrackName(null)
     setEleSourceGsi(false)
+    setUseRoutingDefault(true)
     setStarted(true)
   }
 
@@ -140,12 +145,22 @@ function App() {
     setGpxFilename('')
     setTrackName(null)
     setEleSourceGsi(false)
+    setUseRoutingDefault(true)
     setError(null)
     setShowDiscardConfirm(false)
     setStarted(false)
   }
 
   const allAcptIndices = (rp) => rp.map((p, i) => (p.isAcpt ? i : null)).filter((i) => i !== null)
+
+  // spec.txt 9章（2026-09-13追加）: 両端のuse_routingが共にtrueの場合のみ
+  // ルーティングAPIを呼ぶ。どちらか一方でもfalseなら直線で結ぶ
+  async function segmentBetween(ptA, ptB) {
+    if (!shouldRoute(ptA, ptB)) {
+      return [[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]]
+    }
+    return calcRouteSegment([[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]])
+  }
 
   async function handleMapEvent(evt) {
     const rp = stateRef.current.routePoints
@@ -157,8 +172,9 @@ function App() {
         dispatch({ type: 'ADD_FIRST_POINT', payload: { lat: evt.lat, lon: evt.lng } })
       } else {
         const lastAcpt = [...rp].reverse().find((p) => p.isAcpt)
-        const seg = await calcRouteSegment([[lastAcpt.lat, lastAcpt.lon], [evt.lat, evt.lng]])
-        dispatch({ type: 'EXTEND', payload: { segmentPoints: seg } })
+        const newPoint = { lat: evt.lat, lon: evt.lng, useRouting: useRoutingDefault }
+        const seg = await segmentBetween(lastAcpt, newPoint)
+        dispatch({ type: 'EXTEND', payload: { segmentPoints: seg, useRouting: useRoutingDefault } })
       }
       return
     }
@@ -168,20 +184,21 @@ function App() {
       const acptIndex = evt.acptIdx
       const isFirst = acptIndex === 0
       const isLast = acptIndex === allAcpts.length - 1
+      const trkptIdx = allAcpts[acptIndex]
+      const draggedPoint = { lat: evt.lat, lon: evt.lng, useRouting: rp[trkptIdx].useRouting }
       let backwardSegment = null
       let forwardSegment = null
       if (isFirst) {
         const nxtIdx = nextBoundary(allAcpts[0], rp)
-        forwardSegment = await calcRouteSegment([[evt.lat, evt.lng], [rp[nxtIdx].lat, rp[nxtIdx].lon]])
+        forwardSegment = await segmentBetween(draggedPoint, rp[nxtIdx])
       } else if (isLast) {
         const prevIdx = prevBoundary(allAcpts[allAcpts.length - 1], rp)
-        backwardSegment = await calcRouteSegment([[rp[prevIdx].lat, rp[prevIdx].lon], [evt.lat, evt.lng]])
+        backwardSegment = await segmentBetween(rp[prevIdx], draggedPoint)
       } else {
-        const trkptIdx = allAcpts[acptIndex]
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        backwardSegment = await calcRouteSegment([[rp[prevIdx].lat, rp[prevIdx].lon], [evt.lat, evt.lng]])
-        forwardSegment = await calcRouteSegment([[evt.lat, evt.lng], [rp[nxtIdx].lat, rp[nxtIdx].lon]])
+        backwardSegment = await segmentBetween(rp[prevIdx], draggedPoint)
+        forwardSegment = await segmentBetween(draggedPoint, rp[nxtIdx])
       }
       dispatch({ type: 'ACPT_DRAG_END', payload: { acptIndex, backwardSegment, forwardSegment } })
       return
@@ -197,9 +214,31 @@ function App() {
         const trkptIdx = allAcpts[acptIndex]
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        middleSegment = await calcRouteSegment([[rp[prevIdx].lat, rp[prevIdx].lon], [rp[nxtIdx].lat, rp[nxtIdx].lon]])
+        middleSegment = await segmentBetween(rp[prevIdx], rp[nxtIdx])
       }
       dispatch({ type: 'ACPT_DELETE', payload: { acptIndex, middleSegment } })
+      return
+    }
+
+    if (evt.type === 'acpt_toggle_routing') {
+      const allAcpts = allAcptIndices(rp)
+      const acptIndex = evt.acptIdx
+      const trkptIdx = allAcpts[acptIndex]
+      const isFirst = acptIndex === 0
+      const isLast = acptIndex === allAcpts.length - 1
+      const newUseRouting = !rp[trkptIdx].useRouting
+      const centerPoint = { lat: rp[trkptIdx].lat, lon: rp[trkptIdx].lon, useRouting: newUseRouting }
+      let backwardSegment = null
+      let forwardSegment = null
+      if (!isFirst) {
+        const prevIdx = prevBoundary(trkptIdx, rp)
+        backwardSegment = await segmentBetween(rp[prevIdx], centerPoint)
+      }
+      if (!isLast) {
+        const nxtIdx = nextBoundary(trkptIdx, rp)
+        forwardSegment = await segmentBetween(centerPoint, rp[nxtIdx])
+      }
+      dispatch({ type: 'ACPT_TOGGLE_ROUTING', payload: { acptIndex, newUseRouting, backwardSegment, forwardSegment } })
       return
     }
 
@@ -207,9 +246,10 @@ function App() {
       const nearIdx = evt.nearestTrkptIdx
       const prevIdx = prevBoundary(nearIdx, rp)
       const nxtIdx = nextBoundary(nearIdx, rp)
-      const backwardSegment = await calcRouteSegment([[rp[prevIdx].lat, rp[prevIdx].lon], [rp[nearIdx].lat, rp[nearIdx].lon]])
-      const forwardSegment = await calcRouteSegment([[rp[nearIdx].lat, rp[nearIdx].lon], [rp[nxtIdx].lat, rp[nxtIdx].lon]])
-      dispatch({ type: 'INSERT_ACPT', payload: { trkptIndex: nearIdx, backwardSegment, forwardSegment } })
+      const newPoint = { lat: rp[nearIdx].lat, lon: rp[nearIdx].lon, useRouting: useRoutingDefault }
+      const backwardSegment = await segmentBetween(rp[prevIdx], newPoint)
+      const forwardSegment = await segmentBetween(newPoint, rp[nxtIdx])
+      dispatch({ type: 'INSERT_ACPT', payload: { trkptIndex: nearIdx, backwardSegment, forwardSegment, useRouting: useRoutingDefault } })
       return
     }
 
@@ -282,11 +322,28 @@ function App() {
     dispatch({ type: 'APPLY_TURN_DETECTION', payload: { assignments } })
   }
 
-  const { trkptsForMap, acptsForMap, wptsForMap, totalDistKm, gainM } = useMemo(() => {
+  const { trkptsForMap, trkptSegments, acptsForMap, wptsForMap, totalDistKm, gainM } = useMemo(() => {
     const rp = state.routePoints
     const trkptsForMap = rp.map((p) => [p.lat, p.lon])
+
+    // spec.txt 7-1章（2026-09-13追加）: ルート検索OFFの区間（直線）を
+    // 破線で描画するため、境界点（acptまたはwpt）ごとにポリラインを分割する
+    const trkptSegments = []
+    if (rp.length > 1) {
+      const boundaryIndices = rp.map((p, i) => (p.isAcpt || p.wpt !== null ? i : null)).filter((i) => i !== null)
+      if (boundaryIndices.length < 2) {
+        trkptSegments.push({ points: trkptsForMap, routed: true })
+      } else {
+        for (let k = 0; k < boundaryIndices.length - 1; k++) {
+          const s = boundaryIndices[k]
+          const e = boundaryIndices[k + 1]
+          trkptSegments.push({ points: trkptsForMap.slice(s, e + 1), routed: shouldRoute(rp[s], rp[e]) })
+        }
+      }
+    }
+
     const acptsForMap = rp
-      .map((p, i) => (p.isAcpt ? { lat: p.lat, lng: p.lon, trkptIdx: i } : null))
+      .map((p, i) => (p.isAcpt ? { lat: p.lat, lng: p.lon, trkptIdx: i, useRouting: p.useRouting } : null))
       .filter(Boolean)
     const wptsForMap = rp
       .map((p, i) => {
@@ -315,7 +372,7 @@ function App() {
       }
     }
 
-    return { trkptsForMap, acptsForMap, wptsForMap, totalDistKm, gainM }
+    return { trkptsForMap, trkptSegments, acptsForMap, wptsForMap, totalDistKm, gainM }
   }, [state.routePoints, state.eleChoice])
 
   // spec.txt 4章: GPXのトラック名 → ファイル名 → 新規ルート の優先順で決定
@@ -390,9 +447,20 @@ function App() {
       )}
       <div className="main-area">
         <div className="map-col">
+          {started && (
+            <label className="routing-toggle">
+              <input
+                type="checkbox"
+                checked={useRoutingDefault}
+                onChange={(e) => setUseRoutingDefault(e.target.checked)}
+              />
+              🧭 新規ポイントのルート検索: {useRoutingDefault ? 'ON' : 'OFF'}
+            </label>
+          )}
           <MapView
             ref={mapViewRef}
             trkpts={trkptsForMap}
+            trkptSegments={trkptSegments}
             acpts={acptsForMap}
             wpts={wptsForMap}
             center={DEFAULT_CENTER}
