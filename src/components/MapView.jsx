@@ -294,10 +294,19 @@ const MapView = forwardRef(function MapView(
       marker.on('contextmenu', (e) => {
         L.DomEvent.stopPropagation(e)
         L.DomEvent.preventDefault(e)
-        openActionPopup(map, e.latlng, [
+        const items = []
+        // spec.txt 8-3章（2026-09-13追加）: wptが未設定のacptのみ表示する
+        if (!a.hasWpt) {
+          items.push({
+            label: '🔀 ターンポイントに変更する',
+            onClick: () => emitEvent({ type: 'dialog_result', action: 'wpt', lat: a.lat, lng: a.lng, nearestTrkptIdx: a.trkptIdx }),
+          })
+        }
+        items.push(
           { label: '🗑 削除する', onClick: () => emitEvent({ type: 'acpt_delete', acptIdx: i }) },
-          { label: '✖ 何もしない', onClick: () => {} },
-        ])
+          { label: '✖ 何もしない', onClick: () => {} }
+        )
+        openActionPopup(map, e.latlng, items)
       })
       addLayer(marker)
     })

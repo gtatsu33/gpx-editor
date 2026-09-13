@@ -568,6 +568,15 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     「🗑 削除する」「✖ キャンセル」のアクションメニューを表示する
     （7-2/7-4章）。
 
+  acptの右クリックメニューへの「ターンポイントに変更する」追加
+  （spec.txt 8-3章、2026-09-13追加）:
+    新規のreducerアクションは追加していない。App.jsxのacptsForMapに
+    hasWpt: p.wpt !== null を追加し、MapView.jsxのacpt contextmenuで
+    hasWptがfalseの場合のみ「🔀 ターンポイントに変更する」を先頭に表示。
+    選択時は既存の dialog_result(action='wpt', nearestTrkptIdx: そのacptの
+    trkptIndex) をそのまま発火する（8-5と全く同じイベント・同じ
+    App.jsx/useRouteReducer.jsのINSERT_WPT処理を再利用）。
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 9. RDP間引きの実装方針

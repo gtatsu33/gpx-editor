@@ -343,7 +343,7 @@ function App() {
     }
 
     const acptsForMap = rp
-      .map((p, i) => (p.isAcpt ? { lat: p.lat, lng: p.lon, trkptIdx: i, useRouting: p.useRouting } : null))
+      .map((p, i) => (p.isAcpt ? { lat: p.lat, lng: p.lon, trkptIdx: i, useRouting: p.useRouting, hasWpt: p.wpt !== null } : null))
       .filter(Boolean)
     const wptsForMap = rp
       .map((p, i) => {
