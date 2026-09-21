@@ -507,6 +507,29 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     タイムアウト・エラー時は入力pointsをそのまま返す（直線フォールバック。
     routing.pyのロジックをそのまま踏襲）。
 
+    【2026-09-21変更】bicycle costingは、bicycle=yes等のタグがない歩道
+    （highway=footway/path）を通行候補から除外する一方、到達不能にはならず
+    自転車専用の道路網内で大きく迂回してでも接続してしまう（Valhalla本体の
+    既知の制限。GitHub issue valhalla/valhalla#5029, #5753で報告されている
+    挙動）。そのため「APIが失敗したらpedestrianにフォールバックする」方式
+    では迂回を検出できない。calcRouteSegmentを、常にbicycleとpedestrianの
+    両方でrequestRoute()を呼び、両方成功した場合は各ルートの総距離
+    （lib/geo.js haversineで各点間距離を合計）を比較して短い方を採用する
+    実装に変更した。片方のみ成功時はその結果、両方失敗時は入力points
+    （直線フォールバック）を返す。
+
+    第3引数オプションに pedestrianFallback（既定true）を追加。falseの場合は
+    従来通りbicycle costingのみでリクエストする（pedestrian requestを呼ばない。
+    レート制限待機・API呼び出し回数が半分で済む）。
+
+    App.jsxに pedestrianFallback state（既定true、useRoutingDefaultと同様に
+    セッション内のみでGPXには保存しない）を追加し、segmentBetween(ptA, ptB)
+    経由のcalcRouteSegment呼び出しに { pedestrianFallback } を渡す。
+    segmentBetweenは8章の全ハンドラから呼ばれる唯一の経路計算窓口のため、
+    新規点追加・acpt移動などルート再計算が発生するたびに、その時点の
+    トグル値が反映される。UIはuseRoutingDefaultトグルの直下に
+    「🚶 歩道もルート候補に含める: ON/OFF」チェックボックスとして追加した。
+
   lib/mapMatching.js:
     Valhalla trace_attributes への呼び出しを50点チャンクずつ「順次」
     実行する（並列にしない。理由: キャンセル・進捗表示・

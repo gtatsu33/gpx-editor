@@ -48,10 +48,63 @@ describe('routing.js calcRouteSegment', () => {
     let t = 1_000_000
     const now = () => t
 
-    await calcRouteSegment([[35.0, 139.0]], { fetchImpl, sleep, now })
+    await calcRouteSegment([[35.0, 139.0]], { fetchImpl, sleep, now, pedestrianFallback: false })
     t += 200 // 200ms後に2回目を呼ぶ
-    await calcRouteSegment([[35.0, 139.0]], { fetchImpl, sleep, now })
+    await calcRouteSegment([[35.0, 139.0]], { fetchImpl, sleep, now, pedestrianFallback: false })
 
     expect(sleep).toHaveBeenLastCalledWith(800)
+  })
+
+  describe('pedestrianFallback（2026-09-21追加）', () => {
+    it('デフォルトでbicycleとpedestrianの両方を計算し、距離が短い方を採用する', async () => {
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            // 大きく迂回する自転車ルート
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.05, 35.05], [139.001, 35.001]] } }],
+          })
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            // 短い歩道経由の歩行者ルート
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.001, 35.001]] } }],
+          })
+        )
+      const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
+      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+    })
+
+    it('pedestrianFallback: falseの場合はbicycleの結果のみを使う（pedestrianを呼ばない）', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: 'Ok',
+          routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.001, 35.001]] } }],
+        })
+      )
+      await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts, pedestrianFallback: false })
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it('bicycleが失敗しpedestrianが成功した場合はpedestrianの結果を使う', async () => {
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(jsonResponse({ code: 'NoRoute' }))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.001, 35.001]] } }],
+          })
+        )
+      const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
+      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+    })
+
+    it('両方失敗した場合は入力をそのまま返す', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ code: 'NoRoute' }))
+      const input = [[35.0, 139.0], [35.001, 139.001]]
+      const result = await calcRouteSegment(input, { fetchImpl, ...noWaitOpts })
+      expect(result).toBe(input)
+    })
   })
 })

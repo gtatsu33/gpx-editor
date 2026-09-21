@@ -46,6 +46,10 @@ function App() {
   // spec.txt 4章（2026-09-13追加）: 新規acptのルート検索デフォルト値。
   // 保持しない仕様のため、編集画面を開くたび常にtrueで始まる
   const [useRoutingDefault, setUseRoutingDefault] = useState(true)
+  // spec.txt 9章・17-1章（2026-09-21追加）: bicycle costingのみでは
+  // 自転車タグのない歩道を大きく迂回してしまうため、pedestrian costingとの
+  // 距離比較フォールバックを有効にするかどうかのトグル（デフォルトON、セッション内設定）
+  const [pedestrianFallback, setPedestrianFallback] = useState(true)
   const mapViewRef = useRef(null)
   const { status: eleStatus, retryFailed: retryEleFailed } = useElevationBackground(state.routePoints, dispatch)
   const { status: turnStatus } = useTurnDetectionBackground(state.routePoints, dispatch)
@@ -159,7 +163,7 @@ function App() {
     if (!shouldRoute(ptA, ptB)) {
       return [[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]]
     }
-    return calcRouteSegment([[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]])
+    return calcRouteSegment([[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]], { pedestrianFallback })
   }
 
   async function handleMapEvent(evt) {
@@ -455,6 +459,16 @@ function App() {
                 onChange={(e) => setUseRoutingDefault(e.target.checked)}
               />
               🧭 新規ポイントのルート検索: {useRoutingDefault ? 'ON' : 'OFF'}
+            </label>
+          )}
+          {started && (
+            <label className="routing-toggle">
+              <input
+                type="checkbox"
+                checked={pedestrianFallback}
+                onChange={(e) => setPedestrianFallback(e.target.checked)}
+              />
+              🚶 歩道もルート候補に含める: {pedestrianFallback ? 'ON' : 'OFF'}
             </label>
           )}
           <MapView
