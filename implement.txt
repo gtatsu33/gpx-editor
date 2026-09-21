@@ -513,10 +513,26 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     既知の制限。GitHub issue valhalla/valhalla#5029, #5753で報告されている
     挙動）。そのため「APIが失敗したらpedestrianにフォールバックする」方式
     では迂回を検出できない。calcRouteSegmentを、常にbicycleとpedestrianの
-    両方でrequestRoute()を呼び、両方成功した場合は各ルートの総距離
-    （lib/geo.js haversineで各点間距離を合計）を比較して短い方を採用する
-    実装に変更した。片方のみ成功時はその結果、両方失敗時は入力points
-    （直線フォールバック）を返す。
+    両方でrequestRoute()を呼ぶ実装に変更した。
+
+    【2026-09-21改訂・当初は総距離比較のみだったが変更】当初は各ルートの
+    総距離（lib/geo.js haversineで各点間距離を合計）を比較して短い方を
+    採用する実装にしたが、実際にユーザーが歩道上にacptをドラッグしても
+    bicycle側にスナップされ続ける事例が報告された。Valhalla /route の
+    OSRM互換レスポンスに含まれる waypoints[].distance（リクエストで渡した
+    地点から実際にスナップされたエッジまでの距離）を実地点で調査したところ、
+    bicycle costingは指定地点から数m〜十数m離れた車道に強引にスナップして
+    いたが、両ルートの総距離の差はわずかで、僅差の勝負でpedestrian側が
+    選ばれるかどうかが不安定だった（歩道への忠実さより総距離の僅かな差の方が
+    支配的になってしまっていた）ことが判明。requestRoute()の戻り値を
+    { coords, snapDistance }（snapDistanceはwaypoints[].distanceの最大値）
+    に変更し、calcRouteSegmentの判定を以下の二段階にした。
+      1. bicycle/pedestrianのsnapDistanceの差がSNAP_DISTANCE_THRESHOLD_M
+         （3m。ユーザー指定）を超える場合は、総距離に関わらずsnapDistanceが
+         小さい方（指定地点に忠実な方）を採用
+      2. 差が3m以内なら、従来通りrouteLength()（総距離）が短い方を採用
+    片方のみ成功時はその結果、両方失敗時は入力points（直線フォールバック）
+    を返す。
 
     第3引数オプションに pedestrianFallback（既定true）を追加。falseの場合は
     従来通りbicycle costingのみでリクエストする（pedestrian requestを呼ばない。

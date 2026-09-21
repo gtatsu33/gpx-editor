@@ -8,6 +8,12 @@ const VALHALLA_ROUTE_URL = 'https://valhalla1.openstreetmap.de/route'
 const MIN_INTERVAL_MS = 1000
 let lastCallAt = 0
 
+// bicycle/pedestrianのスナップ距離差がこの値(m)を超えたら、経路の総距離に
+// 関わらずスナップ距離が小さい方（ドラッグした地点に忠実な方）を優先する。
+// スナップ差がこれ以下なら、両costingとも指定地点に十分正確にスナップできて
+// いるとみなし、経路の総距離が短い方を採用する（spec.txt 9章・17-1章）。
+const SNAP_DISTANCE_THRESHOLD_M = 3
+
 async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now }) {
   const wait = MIN_INTERVAL_MS - (now() - lastCallAt)
   if (wait > 0) await sleep(wait)
@@ -31,7 +37,9 @@ async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now 
     if (!res.ok) return null
     const data = await res.json()
     if (data.code !== 'Ok') return null
-    return data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon])
+    const coords = data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon])
+    const snapDistance = Math.max(0, ...(data.waypoints ?? []).map((w) => w.distance ?? 0))
+    return { coords, snapDistance }
   } catch {
     return null
   }
@@ -52,10 +60,15 @@ function routeLength(coords) {
  * 経路探索の対象道路網に含まれる（spec.txt 9章・17-1章）。
  *
  * pedestrianFallback（デフォルトtrue）がtrueの場合、bicycle costingに加えて
- * pedestrian costingでも計算し、総距離が短い方を採用する。bicycle costingは
- * bicycleタグのない歩道を大きく迂回してでも自転車専用道路網内で強引に
- * つなげてしまうため、失敗時フォールバックでは検出できない「細切れ」を
- * 距離比較によって回避する（spec.txt 9章・17-1章、2026-09-21改訂）。
+ * pedestrian costingでも計算する。bicycle costingは、bicycleタグのない歩道を
+ * 指定地点から離れた車道に大きくスナップしてでも自転車専用道路網内で強引に
+ * つなげてしまうことがある（Valhalla本体の既知の制限。失敗時フォールバックでは
+ * 検出できない）。そのため、まずOSRM互換レスポンスのwaypoints[].distance
+ * （指定地点から実際にスナップされた地点までの距離）を比較し、
+ * その差がSNAP_DISTANCE_THRESHOLD_Mを超える場合は、スナップ距離が小さい方
+ * （＝ドラッグした地点に忠実な方）を採用する。差が閾値以内であれば、両者とも
+ * 指定地点に十分正確にスナップできているとみなし、経路の総距離が短い方を
+ * 採用する（spec.txt 9章・17-1章、2026-09-21改訂）。
  *
  * 失敗時（両costingとも失敗）は points をそのまま返す（直線フォールバック）。
  * points: [[lat, lon], ...]
@@ -68,13 +81,19 @@ export async function calcRouteSegment(
   const bicycleResult = await requestRoute(points, 'bicycle', opts)
 
   if (!pedestrianFallback) {
-    return bicycleResult ?? points
+    return bicycleResult?.coords ?? points
   }
 
   const pedestrianResult = await requestRoute(points, 'pedestrian', opts)
 
   if (bicycleResult && pedestrianResult) {
-    return routeLength(pedestrianResult) < routeLength(bicycleResult) ? pedestrianResult : bicycleResult
+    const snapDiff = bicycleResult.snapDistance - pedestrianResult.snapDistance
+    if (Math.abs(snapDiff) > SNAP_DISTANCE_THRESHOLD_M) {
+      return snapDiff > 0 ? pedestrianResult.coords : bicycleResult.coords
+    }
+    return routeLength(pedestrianResult.coords) < routeLength(bicycleResult.coords)
+      ? pedestrianResult.coords
+      : bicycleResult.coords
   }
-  return bicycleResult ?? pedestrianResult ?? points
+  return bicycleResult?.coords ?? pedestrianResult?.coords ?? points
 }

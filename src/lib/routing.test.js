@@ -107,4 +107,49 @@ describe('routing.js calcRouteSegment', () => {
       expect(result).toBe(input)
     })
   })
+
+  describe('スナップ距離による判定（2026-09-21追加）', () => {
+    it('スナップ距離差が閾値(3m)を超える場合は、総距離に関わらずスナップ距離が小さい方を採用する', async () => {
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            // bicycleは総距離は短いが、歩道から6.2m離れた車道にスナップされている
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.0005, 35.0005]] } }],
+            waypoints: [{ distance: 0 }, { distance: 6.2 }],
+          })
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            // pedestrianは総距離は長いが、指定地点にほぼ正確にスナップされている
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.001, 35.001]] } }],
+            waypoints: [{ distance: 0 }, { distance: 0.1 }],
+          })
+        )
+      const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
+      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+    })
+
+    it('スナップ距離差が閾値(3m)以内の場合は、経路の総距離が短い方を採用する', async () => {
+      const fetchImpl = vi.fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            // bicycleは大きく迂回するが、スナップ自体は正確
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.05, 35.05], [139.001, 35.001]] } }],
+            waypoints: [{ distance: 0 }, { distance: 1 }],
+          })
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            code: 'Ok',
+            routes: [{ geometry: { coordinates: [[139.0, 35.0], [139.001, 35.001]] } }],
+            waypoints: [{ distance: 0 }, { distance: 2 }],
+          })
+        )
+      const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
+      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+    })
+  })
 })
