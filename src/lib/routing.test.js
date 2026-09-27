@@ -57,6 +57,28 @@ describe('routing.js calcRouteSegment', () => {
     expect(sleep).toHaveBeenLastCalledWith(800)
   })
 
+  // spec.txt 9章（2026-09-27追加）: 「歩道もルート候補に含める」トグルOFF
+  // （pedestrianFallback: false）の場合、bicycle costingにuse_roads: 1を
+  // 指定して車道を強く優先させる。トグルON（既定）では何も指定しない
+  // （既存動作を変えない）。
+  describe('use_roadsの調整（2026-09-27追加）', () => {
+    function bodyOf(fetchImpl, callIndex = 0) {
+      return JSON.parse(fetchImpl.mock.calls[callIndex][1].body)
+    }
+
+    it('pedestrianFallback: falseの場合、bicycle costingにuse_roads: 1を指定する', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ code: 'NoRoute' }))
+      await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts, pedestrianFallback: false })
+      expect(bodyOf(fetchImpl).costing_options).toEqual({ bicycle: { use_roads: 1 } })
+    })
+
+    it('pedestrianFallback: true（既定）の場合、costing_optionsを指定しない', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ code: 'NoRoute' }))
+      await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
+      expect(bodyOf(fetchImpl).costing_options).toBeUndefined()
+    })
+  })
+
   // spec.txt 9章・11章（2026-09-27追加）: 応答のlegs[].stepsからターン候補を
   // 同時に抽出する（案A）。
   describe('turns抽出（2026-09-27追加）', () => {

@@ -579,6 +579,29 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     従来通りbicycle costingのみでリクエストする（pedestrian requestを呼ばない。
     レート制限待機・API呼び出し回数が半分で済む）。
 
+    【2026-09-27追加・トグルOFF時にbicycle costingのuse_roadsを最大化】
+    ユーザー報告：「歩道もルート候補に含める」トグルをOFFにしていても、
+    幹線道路に並走する（bicycle=yes等タグ付きの）歩道がわずかな曲率の
+    違いで選ばれてしまうケースが多発する。調査の結果、Valhallaのbicycle
+    costingにはhighway=footway/pedestrianを「タグの有無を問わず完全に
+    除外する」オプションは存在しないと判明した（GitHub issue
+    valhalla/valhalla#5753, #5029参照。bicycle=yes/permissive/designated
+    タグがあれば正規の通行可能路として扱われる仕様）。一方、bicycle costing
+    には use_roads（0〜1、車道と一緒に走ることへの許容度。既定0.25で
+    分離歩道・自転車道を好む方向に寄っている）という重み付けパラメータが
+    公式に存在する（Mapzenブログ記事「Find better bicycle routes with new
+    Valhalla options」参照）。
+
+    ハードな除外ではなく重み付けの調整だが、pedestrianFallback: falseの
+    場合にrequestRoute()経由でbicycle costingリクエストへ
+    costing_options.bicycle.use_roads: 1（USE_ROADS_AVOID_SIDEWALKS定数、
+    routing.js）を指定することで、わずかな時短でしか歩道を選ばない
+    ケースは大幅に減らせる。requestRoute()の第4引数オプションに
+    costingOptionsを追加し、指定があればbody.costing_options[costing]に
+    格納する汎用的な仕組みにした（bicycle以外のcostingでも将来利用可能）。
+    pedestrianFallback: true（既定）の場合は何も指定せず、既存動作を
+    変えていない。
+
     【2026-09-27追加・案A: maneuverからのターンポイント自動生成】
     requestRoute()の戻り値に turns を追加した（{ coords, snapDistance, turns }）。
     turnsは応答の routes[0].legs[].steps を lib/turns.js の

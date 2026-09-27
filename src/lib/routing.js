@@ -15,7 +15,15 @@ let lastCallAt = 0
 // いるとみなし、経路の総距離が短い方を採用する（spec.txt 9章・17-1章）。
 const SNAP_DISTANCE_THRESHOLD_M = 3
 
-async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now }) {
+// spec.txt 9章（2026-09-27追加）: 「歩道もルート候補に含める」トグルOFF時、
+// bicycle costingのuse_roads（0〜1、車道と一緒に走ることへの許容度。既定0.25
+// ＝分離歩道・自転車道を好む方向）を最大値にして車道を強く優先させる。
+// bicycle=yes等のタグ付き歩道はValhalla側の除外対象にならないため
+// （17-1章参照）、これは「除外」ではなく「わずかな時短では歩道を選ばせない」
+// という重み付けの調整であり、絶対的な除外ではない。
+const USE_ROADS_AVOID_SIDEWALKS = 1
+
+async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now, costingOptions }) {
   const wait = MIN_INTERVAL_MS - (now() - lastCallAt)
   if (wait > 0) await sleep(wait)
   lastCallAt = now()
@@ -26,6 +34,9 @@ async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now 
     format: 'osrm',
     shape_format: 'geojson',
     overview: 'full',
+  }
+  if (costingOptions) {
+    body.costing_options = { [costing]: costingOptions }
   }
   try {
     const res = await fetchWithTimeout(VALHALLA_ROUTE_URL, {
@@ -78,6 +89,12 @@ function routeLength(coords) {
  * 失敗時（両costingとも失敗）は points をそのまま返す（直線フォールバック）。
  * points: [[lat, lon], ...]
  *
+ * pedestrianFallback: false（「歩道もルート候補に含める」トグルOFF）の場合、
+ * bicycle costingにuse_roads: 1（USE_ROADS_AVOID_SIDEWALKS）を指定し、車道を
+ * 強く優先させる（2026-09-27追加。上記USE_ROADS_AVOID_SIDEWALKSの説明参照）。
+ * pedestrianFallback: true（既定）の場合はこの指定を行わず、Valhallaの既定
+ * 挙動のまま（既存動作を変えない）。
+ *
  * 戻り値: { coords, turns }。turnsは採用された経路のmaneuverから抽出した
  * ターン候補（spec.txt 9章・11章、2026-09-27追加）。coordsはindex空間を共有する
  * ([[lat,lon],...]、両端点を含む)。フォールバック時（両costing失敗）はturns=[]。
@@ -87,7 +104,8 @@ export async function calcRouteSegment(
   { fetchImpl = fetch, timeoutMs = 30000, sleep = defaultSleep, now = () => Date.now(), pedestrianFallback = true } = {}
 ) {
   const opts = { fetchImpl, timeoutMs, sleep, now }
-  const bicycleResult = await requestRoute(points, 'bicycle', opts)
+  const bicycleCostingOptions = pedestrianFallback ? undefined : { use_roads: USE_ROADS_AVOID_SIDEWALKS }
+  const bicycleResult = await requestRoute(points, 'bicycle', { ...opts, costingOptions: bicycleCostingOptions })
 
   if (!pedestrianFallback) {
     return bicycleResult ? { coords: bicycleResult.coords, turns: bicycleResult.turns } : { coords: points, turns: [] }
