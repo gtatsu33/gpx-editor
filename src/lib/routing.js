@@ -1,5 +1,6 @@
 import { defaultSleep, fetchWithTimeout } from './http.js'
 import { haversine } from './geo.js'
+import { extractTurnsFromSteps } from './turns.js'
 
 const VALHALLA_ROUTE_URL = 'https://valhalla1.openstreetmap.de/route'
 
@@ -39,7 +40,11 @@ async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now 
     if (data.code !== 'Ok') return null
     const coords = data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon])
     const snapDistance = Math.max(0, ...(data.waypoints ?? []).map((w) => w.distance ?? 0))
-    return { coords, snapDistance }
+    // spec.txt 9章・11章（2026-09-27追加）: 応答のmaneuverからターン候補を
+    // 同時に抽出する。indexはcoords配列（両端点を含む）に対応する絶対インデックス。
+    const steps = (data.routes[0].legs ?? []).flatMap((leg) => leg.steps ?? [])
+    const turns = extractTurnsFromSteps(steps)
+    return { coords, snapDistance, turns }
   } catch {
     return null
   }
@@ -72,6 +77,10 @@ function routeLength(coords) {
  *
  * 失敗時（両costingとも失敗）は points をそのまま返す（直線フォールバック）。
  * points: [[lat, lon], ...]
+ *
+ * 戻り値: { coords, turns }。turnsは採用された経路のmaneuverから抽出した
+ * ターン候補（spec.txt 9章・11章、2026-09-27追加）。coordsはindex空間を共有する
+ * ([[lat,lon],...]、両端点を含む)。フォールバック時（両costing失敗）はturns=[]。
  */
 export async function calcRouteSegment(
   points,
@@ -81,7 +90,7 @@ export async function calcRouteSegment(
   const bicycleResult = await requestRoute(points, 'bicycle', opts)
 
   if (!pedestrianFallback) {
-    return bicycleResult?.coords ?? points
+    return bicycleResult ? { coords: bicycleResult.coords, turns: bicycleResult.turns } : { coords: points, turns: [] }
   }
 
   const pedestrianResult = await requestRoute(points, 'pedestrian', opts)
@@ -89,11 +98,16 @@ export async function calcRouteSegment(
   if (bicycleResult && pedestrianResult) {
     const snapDiff = bicycleResult.snapDistance - pedestrianResult.snapDistance
     if (Math.abs(snapDiff) > SNAP_DISTANCE_THRESHOLD_M) {
-      return snapDiff > 0 ? pedestrianResult.coords : bicycleResult.coords
+      return snapDiff > 0 ? pick(pedestrianResult) : pick(bicycleResult)
     }
     return routeLength(pedestrianResult.coords) < routeLength(bicycleResult.coords)
-      ? pedestrianResult.coords
-      : bicycleResult.coords
+      ? pick(pedestrianResult)
+      : pick(bicycleResult)
   }
-  return bicycleResult?.coords ?? pedestrianResult?.coords ?? points
+  const chosen = bicycleResult ?? pedestrianResult
+  return chosen ? pick(chosen) : { coords: points, turns: [] }
+}
+
+function pick(result) {
+  return { coords: result.coords, turns: result.turns }
 }

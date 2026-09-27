@@ -3,7 +3,17 @@ import 'leaflet/dist/leaflet.css'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { calculateBearing } from '../lib/geo.js'
 import { cumulativeDistances } from '../lib/elevation.js'
-import { clusterCandidates, nearAllWithinThreshold, nearestIndexAtDistance, pxToMeters } from '../lib/mapInteractions.js'
+import {
+  clusterCandidates,
+  nearAllWithinThreshold,
+  nearestIndexAtDistance,
+  nearestPoint,
+  pxToMeters,
+} from '../lib/mapInteractions.js'
+
+// トラックラインの当たり判定幅（px）。見た目の線幅（weight:4）とは独立に、
+// 20px（spec.txt 7-2章の候補選択ピクセル閾値と同じ値）分の判定領域を確保する。
+const TRACK_HIT_WEIGHT = 20
 
 function pinIcon(color, label) {
   const svg =
@@ -86,11 +96,36 @@ const MapView = forwardRef(function MapView(
     dataRef.current.onEvent({ ...payload, center: { lat: c.lat, lng: c.lng }, zoom: map.getZoom(), ts: Date.now() })
   }
 
-  function handleCandidateOrMenu(lat, lng, trkpts, wpts) {
+  function showSingleTrkptMenu(ni, lat, lng, trkpts) {
+    const map = mapRef.current
+    openActionPopup(map, [trkpts[ni][0], trkpts[ni][1]], [
+      { label: '📍 ゴールを延長する', onClick: () => emitEvent({ type: 'dialog_result', action: 'extend', lat, lng, nearestTrkptIdx: ni }) },
+      { label: '⚓ アンカーポイントを挿入する', onClick: () => emitEvent({ type: 'dialog_result', action: 'acpt', lat, lng, nearestTrkptIdx: ni }) },
+      { label: '🔀 ターンポイントを追加する', onClick: () => emitEvent({ type: 'dialog_result', action: 'wpt', lat, lng, nearestTrkptIdx: ni }) },
+      { label: '✖ キャンセル', onClick: () => {} },
+    ])
+  }
+
+  // isTrackClick=true（トラックライン自体のクリック）の場合、20pxの候補閾値内に
+  // trkptが1つも無くても「空クリック」にはしない。長い直線区間ではtrkptの間隔が
+  // 画面上20pxを超えることがあり、線をクリックしているにもかかわらずゴール延長
+  // 扱いになってしまう不具合の修正（2026-09-27）。トラックライン上のクリックは
+  // 「ルート上のどこかをクリックした」ことが自明なため、閾値に関わらず必ず
+  // 最近傍trkptに対するアクションメニューを表示する（spec.txt 7-2章
+  // 「トラックライン自体をクリックした場合も、最近傍trkptに対して同じ
+  // アクションメニューを表示する」）。
+  function handleCandidateOrMenu(lat, lng, trkpts, wpts, { isTrackClick = false } = {}) {
     const map = mapRef.current
     const thrM = pxToMeters(20, map.getZoom(), lat)
     const cands = nearAllWithinThreshold(trkpts, lat, lng, thrM)
     if (!cands.length) {
+      if (isTrackClick) {
+        const nearest = nearestPoint(trkpts, lat, lng)
+        if (nearest) {
+          showSingleTrkptMenu(nearest.idx, lat, lng, trkpts)
+          return
+        }
+      }
       emitEvent({ type: 'click_empty', lat, lng })
       return
     }
@@ -115,13 +150,7 @@ const MapView = forwardRef(function MapView(
         })
       )
     } else {
-      const ni = reps[0].idx
-      openActionPopup(map, [trkpts[ni][0], trkpts[ni][1]], [
-        { label: '📍 ゴールを延長する', onClick: () => emitEvent({ type: 'dialog_result', action: 'extend', lat, lng, nearestTrkptIdx: ni }) },
-        { label: '⚓ アンカーポイントを挿入する', onClick: () => emitEvent({ type: 'dialog_result', action: 'acpt', lat, lng, nearestTrkptIdx: ni }) },
-        { label: '🔀 ターンポイントを追加する', onClick: () => emitEvent({ type: 'dialog_result', action: 'wpt', lat, lng, nearestTrkptIdx: ni }) },
-        { label: '✖ キャンセル', onClick: () => {} },
-      ])
+      showSingleTrkptMenu(reps[0].idx, lat, lng, trkpts)
     }
   }
 
@@ -220,12 +249,25 @@ const MapView = forwardRef(function MapView(
         weight: 4,
         opacity: 0.8,
         dashArray: seg.routed ? null : '6 6',
-      })
-      poly.on('click', (e) => {
-        L.DomEvent.stopPropagation(e)
-        handleCandidateOrMenu(e.latlng.lat, e.latlng.lng, trkpts, wpts)
+        interactive: false, // クリック判定は下記hitLineに一元化する
       })
       addLayer(poly)
+
+      // 見た目の線（weight:4）とは別に、当たり判定だけを太くした透明な線を
+      // 重ねる（2026-09-27追加）。見た目の線幅のままではクリック可能領域が
+      // 狭く、直線の少し外れた位置をクリックすると空クリック（ゴール延長）
+      // 判定になってしまっていたため。TRACK_HIT_WEIGHTは他の候補選択の
+      // ピクセル閾値（spec.txt 7-2章、20px）に合わせている。
+      const hitLine = L.polyline(seg.points, {
+        color: '#000',
+        weight: TRACK_HIT_WEIGHT,
+        opacity: 0,
+      })
+      hitLine.on('click', (e) => {
+        L.DomEvent.stopPropagation(e)
+        handleCandidateOrMenu(e.latlng.lat, e.latlng.lng, trkpts, wpts, { isTrackClick: true })
+      })
+      addLayer(hitLine)
     })
 
     wpts.forEach((w, i) => {

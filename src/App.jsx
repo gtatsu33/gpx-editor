@@ -18,7 +18,7 @@ import { combineTurnName, detectTurns, wptStyle } from './lib/turns.js'
 import { contiguousRanges, nextBoundary, prevBoundary, shouldRoute } from './lib/routePoints.js'
 import { rdpSimplify } from './lib/rdp.js'
 import { calcRouteSegment } from './lib/routing.js'
-import { fetchIntersectionNames, fetchSpotName } from './lib/overpass.js'
+import { fetchIntersectionNames } from './lib/overpass.js'
 import { cumulativeDistances } from './lib/elevation.js'
 import { nearestIndexAtDistance } from './lib/mapInteractions.js'
 import { routeReducer, initialRouteState } from './hooks/useRouteReducer.js'
@@ -161,7 +161,7 @@ function App() {
   // ルーティングAPIを呼ぶ。どちらか一方でもfalseなら直線で結ぶ
   async function segmentBetween(ptA, ptB) {
     if (!shouldRoute(ptA, ptB)) {
-      return [[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]]
+      return { coords: [[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]], turns: [] }
     }
     return calcRouteSegment([[ptA.lat, ptA.lon], [ptB.lat, ptB.lon]], { pedestrianFallback })
   }
@@ -260,14 +260,11 @@ function App() {
     if (evt.type === 'dialog_result' && evt.action === 'wpt') {
       const nearIdx = evt.nearestTrkptIdx
       if (rp[nearIdx].wpt !== null) return
-      const point = { lat: rp[nearIdx].lat, lon: rp[nearIdx].lon, index: nearIdx }
-      const inames = await fetchIntersectionNames([point], { httpTimeout: 5, maxAttempts: 1 })
-      const intersectionName = inames[nearIdx] ?? null
-      let poiName = null
-      if (!intersectionName) {
-        poiName = await fetchSpotName(rp[nearIdx].lat, rp[nearIdx].lon, { httpTimeout: 5, maxAttempts: 1 })
-      }
-      dispatch({ type: 'INSERT_WPT', payload: { trkptIndex: nearIdx, intersectionName, poiName } })
+      // spec.txt 8-5章（2026-09-27改訂）: Overpassの応答を待たず即座に
+      // 仮名（pending）のwptを反映する。名前解決はuseTurnDetectionBackground.js
+      // （15章の自動検出と共通）がpending: trueを検知して自動的にバックグラウンドで
+      // 行う。ここで個別にOverpassへ問い合わせない（重複フェッチを避けるため）
+      dispatch({ type: 'INSERT_WPT', payload: { trkptIndex: nearIdx } })
       return
     }
 

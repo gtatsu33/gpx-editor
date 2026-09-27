@@ -18,28 +18,30 @@ describe('routing.js calcRouteSegment', () => {
       })
     )
     const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
-    expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+    expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
+    expect(result.turns).toEqual([])
   })
 
   it('APIがcode!=="Ok"を返したら入力をそのまま返す（フォールバック）', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ code: 'NoRoute' }))
     const input = [[35.0, 139.0], [35.001, 139.001]]
     const result = await calcRouteSegment(input, { fetchImpl, ...noWaitOpts })
-    expect(result).toBe(input)
+    expect(result.coords).toBe(input)
+    expect(result.turns).toEqual([])
   })
 
   it('HTTPエラー時は入力をそのまま返す（フォールバック）', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { ok: false, status: 500 }))
     const input = [[35.0, 139.0], [35.001, 139.001]]
     const result = await calcRouteSegment(input, { fetchImpl, ...noWaitOpts })
-    expect(result).toBe(input)
+    expect(result.coords).toBe(input)
   })
 
   it('ネットワークエラー・タイムアウト時は入力をそのまま返す（フォールバック）', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('network error'))
     const input = [[35.0, 139.0], [35.001, 139.001]]
     const result = await calcRouteSegment(input, { fetchImpl, ...noWaitOpts })
-    expect(result).toBe(input)
+    expect(result.coords).toBe(input)
   })
 
   it('前回呼び出しから1秒未満の場合は残り時間だけ待機してから送信する', async () => {
@@ -53,6 +55,46 @@ describe('routing.js calcRouteSegment', () => {
     await calcRouteSegment([[35.0, 139.0]], { fetchImpl, sleep, now, pedestrianFallback: false })
 
     expect(sleep).toHaveBeenLastCalledWith(800)
+  })
+
+  // spec.txt 9章・11章（2026-09-27追加）: 応答のlegs[].stepsからターン候補を
+  // 同時に抽出する（案A）。
+  describe('turns抽出（2026-09-27追加）', () => {
+    it('応答のmaneuverからturnsを抽出する（depart/arrive除外、junction_nameの多言語連結は先頭のみ採用）', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse({
+          code: 'Ok',
+          routes: [
+            {
+              geometry: { coordinates: [[139.0, 35.0], [139.001, 35.001], [139.002, 35.002], [139.003, 35.003]] },
+              legs: [
+                {
+                  steps: [
+                    { maneuver: { type: 'depart', bearing_before: 0, bearing_after: 10 }, intersections: [{ geometry_index: 0 }] },
+                    {
+                      maneuver: { type: 'turn', bearing_before: 10, bearing_after: 280 },
+                      intersections: [{ geometry_index: 1 }],
+                      junction_name: '神宮前六丁目, Jingumae 6',
+                    },
+                    {
+                      maneuver: { type: 'continue', bearing_before: 280, bearing_after: 290 },
+                      intersections: [{ geometry_index: 2 }],
+                    },
+                    { maneuver: { type: 'arrive', bearing_before: 290, bearing_after: 290 }, intersections: [{ geometry_index: 3 }] },
+                  ],
+                },
+              ],
+            },
+          ],
+        })
+      )
+      const result = await calcRouteSegment(
+        [[35.0, 139.0], [35.003, 139.003]],
+        { fetchImpl, ...noWaitOpts, pedestrianFallback: false }
+      )
+      // depart/arriveは除外、continueは|delta|<45で除外、turnのみ残る
+      expect(result.turns).toEqual([{ index: 1, delta: -90, name: '神宮前六丁目' }])
+    })
   })
 
   describe('pedestrianFallback（2026-09-21追加）', () => {
@@ -73,7 +115,7 @@ describe('routing.js calcRouteSegment', () => {
           })
         )
       const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
-      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+      expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
     })
 
     it('pedestrianFallback: falseの場合はbicycleの結果のみを使う（pedestrianを呼ばない）', async () => {
@@ -97,14 +139,14 @@ describe('routing.js calcRouteSegment', () => {
           })
         )
       const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
-      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+      expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
     })
 
     it('両方失敗した場合は入力をそのまま返す', async () => {
       const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ code: 'NoRoute' }))
       const input = [[35.0, 139.0], [35.001, 139.001]]
       const result = await calcRouteSegment(input, { fetchImpl, ...noWaitOpts })
-      expect(result).toBe(input)
+      expect(result.coords).toBe(input)
     })
   })
 
@@ -128,7 +170,7 @@ describe('routing.js calcRouteSegment', () => {
           })
         )
       const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
-      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+      expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
     })
 
     it('スナップ距離差が閾値(3m)以内の場合は、経路の総距離が短い方を採用する', async () => {
@@ -149,7 +191,7 @@ describe('routing.js calcRouteSegment', () => {
           })
         )
       const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
-      expect(result).toEqual([[35.0, 139.0], [35.001, 139.001]])
+      expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
     })
   })
 })

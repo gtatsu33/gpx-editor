@@ -2,7 +2,7 @@ import { useReducer } from 'react'
 import { angleDiff, calculateBearing, nearestPointIndexFrom } from '../lib/geo.js'
 import { cleanElevationSpikes, computeGradeStats } from '../lib/elevation.js'
 import { deepCopyRoutePoints, makeRoutePoint, nextBoundary, prevBoundary } from '../lib/routePoints.js'
-import { combineTurnName } from '../lib/turns.js'
+import { applyRoutedTurns, combineTurnName } from '../lib/turns.js'
 
 /**
  * spec.txt 8章の各イベントに対応するreducer。
@@ -131,8 +131,9 @@ export function routeReducer(state, action) {
       if (rp.length && rp[rp.length - 1].wpt && rp[rp.length - 1].wpt.name === '目的地') {
         rp[rp.length - 1] = { ...rp[rp.length - 1], wpt: null }
       }
-      const tail = segmentPoints.slice(1)
+      const tail = segmentPoints.coords.slice(1)
       const newPts = tail.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === tail.length - 1, changed: true }))
+      applyRoutedTurns(newPts, segmentPoints.turns, 1)
       if (newPts.length) {
         newPts[newPts.length - 1] = {
           ...newPts[newPts.length - 1],
@@ -161,16 +162,18 @@ export function routeReducer(state, action) {
 
       if (isFirst) {
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        const head = forwardSegment.slice(0, -1)
+        const head = forwardSegment.coords.slice(0, -1)
         const newPts = head.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === 0, changed: true }))
+        applyRoutedTurns(newPts, forwardSegment.turns, 0)
         if (newPts.length) {
           newPts[0] = { ...newPts[0], wpt: { name: 'スタート', delta: null }, changed: false, useRouting: draggedUseRouting }
         }
         newRp = [...newPts, ...rp.slice(nxtIdx)]
       } else if (isLast) {
         const prevIdx = prevBoundary(trkptIdx, rp)
-        const tail = backwardSegment.slice(1)
+        const tail = backwardSegment.coords.slice(1)
         const newPts = tail.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === tail.length - 1, changed: true }))
+        applyRoutedTurns(newPts, backwardSegment.turns, 1)
         if (newPts.length) {
           newPts[newPts.length - 1] = {
             ...newPts[newPts.length - 1],
@@ -183,8 +186,10 @@ export function routeReducer(state, action) {
       } else {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        const bwdTail = backwardSegment.slice(1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        const fwdMid = forwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        const bwdTail = backwardSegment.coords.slice(1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(bwdTail, backwardSegment.turns, 1)
+        const fwdMid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(fwdMid, forwardSegment.turns, 1)
         const newPts = [...bwdTail, ...fwdMid]
         const acptPos = bwdTail.length - 1
         if (acptPos >= 0 && acptPos < newPts.length) {
@@ -238,7 +243,8 @@ export function routeReducer(state, action) {
         const trkptIdx = allAcpts[acptIndex]
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        const newMid = middleSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        const newMid = middleSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(newMid, middleSegment.turns, 1)
         newRp = [...rp.slice(0, prevIdx + 1), ...newMid, ...rp.slice(nxtIdx)]
       }
 
@@ -252,8 +258,10 @@ export function routeReducer(state, action) {
       const undoSnapshot = withUndoSnapshot(state)
       const prevIdx = prevBoundary(trkptIndex, rp)
       const nxtIdx = nextBoundary(trkptIndex, rp)
-      const seg1Tail = backwardSegment.slice(1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-      const seg2Mid = forwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+      const seg1Tail = backwardSegment.coords.slice(1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+      applyRoutedTurns(seg1Tail, backwardSegment.turns, 1)
+      const seg2Mid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+      applyRoutedTurns(seg2Mid, forwardSegment.turns, 1)
       const newPts = [...seg1Tail, ...seg2Mid]
       const newAcptPos = seg1Tail.length - 1
       if (newAcptPos >= 0 && newAcptPos < newPts.length) {
@@ -280,17 +288,21 @@ export function routeReducer(state, action) {
         newRp = [centerPoint]
       } else if (isFirst) {
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        const fwdMid = forwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        const fwdMid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(fwdMid, forwardSegment.turns, 1)
         newRp = [centerPoint, ...fwdMid, ...rp.slice(nxtIdx)]
       } else if (isLast) {
         const prevIdx = prevBoundary(trkptIdx, rp)
-        const bwdMid = backwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        const bwdMid = backwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(bwdMid, backwardSegment.turns, 1)
         newRp = [...rp.slice(0, prevIdx + 1), ...bwdMid, centerPoint]
       } else {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
-        const bwdMid = backwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        const fwdMid = forwardSegment.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        const bwdMid = backwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(bwdMid, backwardSegment.turns, 1)
+        const fwdMid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
+        applyRoutedTurns(fwdMid, forwardSegment.turns, 1)
         newRp = [...rp.slice(0, prevIdx + 1), ...bwdMid, centerPoint, ...fwdMid, ...rp.slice(nxtIdx)]
       }
 
@@ -298,21 +310,21 @@ export function routeReducer(state, action) {
     }
 
     // 8-5: ターンポイントの追加。Undo対象（今回のUndo拡張で追加）
+    // spec.txt 8-5章（2026-09-27改訂）: 交差点名・POI名の取得（Overpass、
+    // 12章）を待たずに、まず方向ラベルのみの仮名（pending: true）を
+    // 即座に反映する。実際の名前解決はApp.jsx側のバックグラウンド処理
+    // （fillWptName）が行い、SET_TURN_NAME_BATCHで確定する
+    // （15章の自動検出と同じ「即時pending→非同期で確定」パターン）。
+    // これにより、Overpassの応答待ち（数秒〜、レート制限時はさらに長い）で
+    // UIが固まって見える問題を解消する。
     case 'INSERT_WPT': {
-      const { trkptIndex, intersectionName, poiName } = action.payload
+      const { trkptIndex } = action.payload
       const rp = [...state.routePoints]
       if (rp[trkptIndex].wpt !== null) return state
       const undoSnapshot = withUndoSnapshot(state)
       const delta = computeDelta(rp, trkptIndex)
-      let name
-      if (delta !== null) {
-        name = combineTurnName(delta, intersectionName)
-      } else if (intersectionName) {
-        name = intersectionName
-      } else {
-        name = poiName ? `「${poiName}」` : '追加したターンポイント'
-      }
-      rp[trkptIndex] = { ...rp[trkptIndex], wpt: { name, delta } }
+      const name = delta !== null ? combineTurnName(delta, null) : '追加したターンポイント'
+      rp[trkptIndex] = { ...rp[trkptIndex], wpt: { name, delta, pending: true } }
       return { ...state, routePoints: rp, undoSnapshot }
     }
 

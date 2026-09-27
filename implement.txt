@@ -320,6 +320,47 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
   自動検出により通常はchanged区間が残らないため、このボタンは
   「保険的な再実行」として機能する。
 
+  【2026-09-27追加・地図クリックからの手動「ターンポイントを追加する」
+  （spec.txt 8-5章、dialog_result(action=wpt)）も同じ非同期パターンに移行】
+  従来はApp.jsxのhandleMapEventが、
+  fetchIntersectionNames({httpTimeout:5, maxAttempts:1}) →（見つからなければ）
+  fetchSpotName(同条件) → INSERT_WPT dispatch という3ステップを全てawaitで
+  直列に待ってからdispatchしていた。Overpassは共有の公開fair-use APIであり、
+  レート制限時はqueryOverpassWithFailoverが2秒待って同一ミラーに再試行する
+  仕組みが入っているため、httpTimeout*2回分＋2秒待機×2（最悪合計20秒超）を
+  何の進捗表示もなくブロックして待つ形になっていた。
+
+  これを解消するため、useTurnDetectionBackground.jsのステップA/Bと同じ
+  「即時pending→非同期で確定」パターンに変更した:
+    - useRouteReducer.jsのINSERT_WPTは、intersectionName/poiNameを
+      受け取らずtrkptIndexのみを受け取るようにし、deltaの有無に応じた
+      仮名（方向ラベルのみ、またはdelta計算不可なら「追加したターン
+      ポイント」）をpending: trueで即座に反映するだけにした
+
+  【2026-09-27追記・バグ修正: App.jsx側で個別にOverpassへ問い合わせる
+  実装（fillWptName）を追加したところ二重フェッチになった】
+    上記の変更でINSERT_WPTがpending: trueを立てるだけになった時点で、
+    useTurnDetectionBackground.jsの既存のルート編集監視（routePoints変化を
+    800msデバウンスで検知するuseEffect）が既に自動的にrunNameFetchLoop()を
+    起動し、pendingな点を拾って解決する設計になっていた。ところが実装時、
+    これに加えてApp.jsxにfillWptName(trkptIndex, lat, lon)という専用の
+    直接フェッチ関数を新設し、INSERT_WPT dispatch直後に呼び出す形にしてしまい、
+    「INSERT_WPTのpending:trueが自動的にuseTurnDetectionBackgroundを起動する」
+    ことを見落として同じ点に対する二重のOverpassフェッチが発生していた
+    （ユーザー報告：1点しか追加していないのに進捗表示が「残り2チャンク」に
+    なる＝ルート全体のpending件数を数える既存ロジックの方が別途動いていた）。
+
+    修正としてApp.jsxのfillWptNameを削除し、INSERT_WPT dispatchのみに戻した
+    （fetchSpotNameのApp.jsxからのimportも不要になったため削除）。名前解決は
+    useTurnDetectionBackground.jsのrunNameFetchLoop()に一本化した。ただし
+    このループは元々「11章の自動検出で見つかった、常にdelta非nullの中間点」
+    しか扱っておらず、delta===null（先頭・末尾への手動追加）のケースの
+    名前解決ロジック（交差点名をそのまま採用、無ければPOI名フォールバック）が
+    無かったため、これをrunNameFetchLoop()内に追加した（fetchSpotNameの
+    importをuseTurnDetectionBackground.jsに追加）。各チャンクの応答処理を
+    Promise.allでラップし、delta===nullかつ交差点名も見つからない候補のみ
+    fetchSpotNameを追加で呼ぶ（他の候補は待たせない）。
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 3. 技術スタック全体方針
@@ -537,6 +578,42 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     第3引数オプションに pedestrianFallback（既定true）を追加。falseの場合は
     従来通りbicycle costingのみでリクエストする（pedestrian requestを呼ばない。
     レート制限待機・API呼び出し回数が半分で済む）。
+
+    【2026-09-27追加・案A: maneuverからのターンポイント自動生成】
+    requestRoute()の戻り値に turns を追加した（{ coords, snapDistance, turns }）。
+    turnsは応答の routes[0].legs[].steps を lib/turns.js の
+    extractTurnsFromSteps(steps) に渡して得る（spec.txt 9章・11-1章）。
+    bearing_before/bearing_afterはAPIが既に計算済みの値をそのまま使い、
+    幾何再計算はしない（実測で、Valhalla /route のOSRM互換応答における
+    steps[].intersections[0].geometry_index が返却座標列のインデックスと
+    厳密に一致することを確認済み）。calcRouteSegmentの戻り値自体も
+    coords単体から { coords, turns } に変更した（フォールバック時は
+    turns: []）。この変更に伴い、App.jsxのsegmentBetween、および
+    App.jsxから各reducerアクション（EXTEND/ACPT_DRAG_END/ACPT_DELETE/
+    INSERT_ACPT/ACPT_TOGGLE_ROUTING）に渡すsegmentPoints/backwardSegment/
+    forwardSegment/middleSegmentは、すべて素の座標配列ではなく
+    { coords, turns } オブジェクトになった。
+
+    useRouteReducer.js側は、各アクションで新規点を生成する箇所
+    （makeRoutePointへのマッピング直後、スタート/目的地等の境界点上書きより
+    前）で lib/turns.js の applyRoutedTurns(points, turns, offset) を呼ぶ。
+    offsetは「元のcoords配列（両端点を含む）に対する、生成したpoints[0]の
+    絶対インデックス」で、既存の .slice(1) / .slice(0,-1) / .slice(1,-1) と
+    同じ切り出し方に合わせて機械的に決まる（先頭を1つ削るsliceならoffset=1、
+    削らない/末尾のみ削るsliceならoffset=0）。ACPT_DRAG_ENDの中間acpt移動・
+    ACPT_TOGGLE_ROUTINGのように前後2つのsegmentを合成するケースは、
+    各segmentの座標配列ごとに個別にapplyRoutedTurnsを呼ぶ
+    （backwardSegment.turnsとforwardSegment.turnsを混同しない）。
+
+    applyRoutedTurns自体は、turnsの各候補についてjunction_name
+    （extractTurnsFromStepsが取得済み。無ければnull）を使い
+    combineTurnName(delta, name)で名前を組み立てる。nameがあれば
+    pending: falseで即時確定、無ければ既存のpending: true（12章の
+    Overpassバックグラウンド取得に委ねる。useTurnDetectionBackground.js
+    は変更不要。既存の「wpt.pending===trueを全体スキャンする」ループが
+    そのまま拾う）。適用した点は changed: false にする。これにより
+    11-2章の角度法（changed=trueの区間を対象にする）による再検出対象から
+    自動的に除外される。
 
     App.jsxに pedestrianFallback state（既定true、useRoutingDefaultと同様に
     セッション内のみでGPXには保存しない）を追加し、segmentBetween(ptA, ptB)

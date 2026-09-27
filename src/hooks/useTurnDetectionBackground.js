@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { combineTurnName, detectTurns } from '../lib/turns.js'
 import { contiguousRanges } from '../lib/routePoints.js'
-import { fetchIntersectionNames } from '../lib/overpass.js'
+import { fetchIntersectionNames, fetchSpotName } from '../lib/overpass.js'
 
 const DEBOUNCE_MS = 800
 const NAME_BATCH_SIZE = 10
@@ -90,9 +90,26 @@ export function useTurnDetectionBackground(routePoints, dispatch) {
       // ルート編集でインデックスがずれた点には書き込まない（取得開始時と座標が
       // 一致する点のみ反映。ずれた点はpendingのままなので次の周回で改めて拾われる）
       const curRp = routePointsRef.current
-      const assignments = turns
-        .filter((t) => curRp[t.index] && curRp[t.index].lat === t.lat && curRp[t.index].lon === t.lon)
-        .map((t) => ({ trkptIndex: t.index, name: combineTurnName(t.delta, inames[t.index] ?? null) }))
+      const valid = turns.filter((t) => curRp[t.index] && curRp[t.index].lat === t.lat && curRp[t.index].lon === t.lon)
+      // spec.txt 8-5章（2026-09-27追加）: delta===null（先頭・末尾に手動で
+      // ターンポイントを追加した場合。11章の自動検出は常にdeltaを持つ中間点
+      // しか対象にしないため、このケースはINSERT_WPT経由のpendingのみで発生する）
+      // は交差点名をそのまま採用し、見つからなければPOI名フォールバックを試みる。
+      const assignments = await Promise.all(
+        valid.map(async (t) => {
+          const foundName = inames[t.index] ?? null
+          let name
+          if (t.delta !== null) {
+            name = combineTurnName(t.delta, foundName)
+          } else if (foundName) {
+            name = foundName
+          } else {
+            const poiName = await fetchSpotName(t.lat, t.lon)
+            name = poiName ? `「${poiName}」` : '追加したターンポイント'
+          }
+          return { trkptIndex: t.index, name }
+        })
+      )
       if (assignments.length) {
         dispatch({ type: 'SET_TURN_NAME_BATCH', payload: { assignments } })
       }

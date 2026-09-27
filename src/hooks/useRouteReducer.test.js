@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { makeRoutePoint } from '../lib/routePoints.js'
 import { initialRouteState, routeReducer } from './useRouteReducer.js'
 
+// routing.js calcRouteSegment / App.jsx segmentBetween の戻り値形状
+// {coords, turns}（2026-09-27改訂）を模したテスト用ヘルパー
+function seg(coords, turns = []) {
+  return { coords, turns }
+}
+
 function baseFivePointRoute() {
   return {
     ...initialRouteState(),
@@ -37,7 +43,7 @@ describe('routeReducer', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
         type: 'EXTEND',
-        payload: { segmentPoints: [[35.004, 139.0], [35.005, 139.0], [35.006, 139.0]] },
+        payload: { segmentPoints: seg([[35.004, 139.0], [35.005, 139.0], [35.006, 139.0]]) },
       })
       expect(next.routePoints).toHaveLength(7)
       const last = next.routePoints[next.routePoints.length - 1]
@@ -50,17 +56,46 @@ describe('routeReducer', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
         type: 'EXTEND',
-        payload: { segmentPoints: [[35.004, 139.0], [35.005, 139.0]] },
+        payload: { segmentPoints: seg([[35.004, 139.0], [35.005, 139.0]]) },
       })
       const oldGoalPoint = next.routePoints[4]
       expect(oldGoalPoint.wpt).toBeNull()
+    })
+
+    // spec.txt 9章・11章（2026-09-27追加）: ルーティングAPI応答から抽出したturnsを
+    // 中間点へ即座に適用する。indexはsegmentPoints.coords（両端点含む）の
+    // 絶対インデックス。EXTENDではtail=coords.slice(1)を使うためoffsetは1
+    // （turns[].indexから1を引いた位置がnewPts内の対応点になる）。
+    it('ルーティング応答のturnsを中間点に即時反映する（junction_name有り→確定、無し→pending）', () => {
+      const state = baseFivePointRoute()
+      const next = routeReducer(state, {
+        type: 'EXTEND',
+        payload: {
+          segmentPoints: seg(
+            [[35.004, 139.0], [35.0045, 139.0], [35.005, 139.0], [35.006, 139.0]],
+            [
+              { index: 1, delta: -70, name: '神宮前六丁目' }, // coords[1] → newPts[0]
+              { index: 2, delta: 80, name: null }, // coords[2] → newPts[1]
+            ]
+          ),
+        },
+      })
+      // newPts = [coords[1], coords[2], coords[3]=末尾acpt]
+      expect(next.routePoints[5]).toMatchObject({
+        wpt: { name: '神宮前六丁目を左折', delta: -70, pending: false },
+        changed: false,
+      })
+      expect(next.routePoints[6]).toMatchObject({
+        wpt: { name: '右折', delta: 80, pending: true },
+        changed: false,
+      })
     })
 
     it('useRouting=falseを新しい末尾acptに設定する（2026-09-13追加）', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
         type: 'EXTEND',
-        payload: { segmentPoints: [[35.004, 139.0], [35.005, 139.0]], useRouting: false },
+        payload: { segmentPoints: seg([[35.004, 139.0], [35.005, 139.0]]), useRouting: false },
       })
       const last = next.routePoints[next.routePoints.length - 1]
       expect(last.useRouting).toBe(false)
@@ -72,7 +107,7 @@ describe('routeReducer', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
         type: 'ACPT_DRAG_END',
-        payload: { acptIndex: 0, backwardSegment: null, forwardSegment: [[36.0, 139.0], [35.002, 139.0]] },
+        payload: { acptIndex: 0, backwardSegment: null, forwardSegment: seg([[36.0, 139.0], [35.002, 139.0]]) },
       })
       expect(next.routePoints).toHaveLength(4)
       expect(next.routePoints[0]).toMatchObject({ lat: 36.0, isAcpt: true, wpt: { name: 'スタート', delta: null } })
@@ -83,7 +118,7 @@ describe('routeReducer', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
         type: 'ACPT_DRAG_END',
-        payload: { acptIndex: 2, backwardSegment: [[35.002, 139.0], [35.005, 139.001]], forwardSegment: null },
+        payload: { acptIndex: 2, backwardSegment: seg([[35.002, 139.0], [35.005, 139.001]]), forwardSegment: null },
       })
       expect(next.routePoints).toHaveLength(4)
       const last = next.routePoints[next.routePoints.length - 1]
@@ -96,8 +131,8 @@ describe('routeReducer', () => {
         type: 'ACPT_DRAG_END',
         payload: {
           acptIndex: 1,
-          backwardSegment: [[35.0, 139.0], [35.0015, 139.0005]],
-          forwardSegment: [[35.0015, 139.0005], [35.004, 139.0]],
+          backwardSegment: seg([[35.0, 139.0], [35.0015, 139.0005]]),
+          forwardSegment: seg([[35.0015, 139.0005], [35.004, 139.0]]),
         },
       })
       expect(next.routePoints).toHaveLength(3)
@@ -125,7 +160,7 @@ describe('routeReducer', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
         type: 'ACPT_DELETE',
-        payload: { acptIndex: 1, middleSegment: [[35.0, 139.0], [35.002, 139.0005], [35.004, 139.0]] },
+        payload: { acptIndex: 1, middleSegment: seg([[35.0, 139.0], [35.002, 139.0005], [35.004, 139.0]]) },
       })
       expect(next.routePoints).toHaveLength(3)
       expect(next.routePoints[1]).toMatchObject({ lat: 35.002, lon: 139.0005 })
@@ -148,8 +183,8 @@ describe('routeReducer', () => {
         type: 'INSERT_ACPT',
         payload: {
           trkptIndex: 1,
-          backwardSegment: [[35.0, 139.0], [35.001, 139.0]],
-          forwardSegment: [[35.001, 139.0], [35.002, 139.0]],
+          backwardSegment: seg([[35.0, 139.0], [35.001, 139.0]]),
+          forwardSegment: seg([[35.001, 139.0], [35.002, 139.0]]),
         },
       })
       expect(next.routePoints).toHaveLength(5)
@@ -165,8 +200,8 @@ describe('routeReducer', () => {
         payload: {
           acptIndex: 1,
           newUseRouting: false,
-          backwardSegment: [[35.0, 139.0], [35.002, 139.0]],
-          forwardSegment: [[35.002, 139.0], [35.004, 139.0]],
+          backwardSegment: seg([[35.0, 139.0], [35.002, 139.0]]),
+          forwardSegment: seg([[35.002, 139.0], [35.004, 139.0]]),
         },
       })
       expect(next.routePoints).toHaveLength(3)
@@ -182,14 +217,18 @@ describe('routeReducer', () => {
           acptIndex: 0,
           newUseRouting: false,
           backwardSegment: null,
-          forwardSegment: [[35.0, 139.0], [35.002, 139.0]],
+          forwardSegment: seg([[35.0, 139.0], [35.002, 139.0]]),
         },
       })
       expect(next.routePoints[0]).toMatchObject({ isAcpt: true, useRouting: false, wpt: { name: 'スタート', delta: null } })
     })
   })
 
-  describe('INSERT_WPT（8-5・Undo対象）', () => {
+  // spec.txt 8-5章（2026-09-27改訂）: Overpassの応答を待たず、まず方向ラベル
+  // のみの仮名（pending: true）を即時反映するようになった。実際の交差点名・
+  // POI名での確定はApp.jsxのfillWptNameが非同期で行い、既存の
+  // SET_TURN_NAME_BATCH（15章の自動検出と共通）で書き込む。
+  describe('INSERT_WPT（8-5・Undo対象・2026-09-27改訂: 即時pending反映）', () => {
     function bendRoute() {
       return {
         ...initialRouteState(),
@@ -201,26 +240,15 @@ describe('routeReducer', () => {
       }
     }
 
-    it('交差点名がある場合「{name}を{方向}」にする', () => {
+    it('deltaが計算できる場合、方向ラベルのみの仮名をpending:trueで即時反映する', () => {
       const state = bendRoute()
-      const next = routeReducer(state, {
-        type: 'INSERT_WPT',
-        payload: { trkptIndex: 1, intersectionName: 'サンプル交差点', poiName: null },
-      })
-      expect(next.routePoints[1].wpt.name).toBe('サンプル交差点を右折')
+      const next = routeReducer(state, { type: 'INSERT_WPT', payload: { trkptIndex: 1 } })
+      expect(next.routePoints[1].wpt).toMatchObject({ name: '右折', pending: true })
+      expect(next.routePoints[1].wpt.delta).not.toBeNull()
       expect(next.undoSnapshot).toEqual(state.routePoints)
     })
 
-    it('交差点名が無い場合は方向ラベルのみ', () => {
-      const state = bendRoute()
-      const next = routeReducer(state, {
-        type: 'INSERT_WPT',
-        payload: { trkptIndex: 1, intersectionName: null, poiName: null },
-      })
-      expect(next.routePoints[1].wpt.name).toBe('右折')
-    })
-
-    it('delta計算不可＋交差点名ありならそのまま名前にする', () => {
+    it('delta計算不可（先頭・末尾）の場合は「追加したターンポイント」をpending:trueで即時反映する', () => {
       const state = {
         ...initialRouteState(),
         routePoints: [
@@ -228,50 +256,24 @@ describe('routeReducer', () => {
           makeRoutePoint(35.001, 139.0, { isAcpt: true, wpt: { name: '目的地', delta: null } }),
         ],
       }
-      const next = routeReducer(state, {
-        type: 'INSERT_WPT',
-        payload: { trkptIndex: 0, intersectionName: 'どこかの地点', poiName: null },
-      })
-      expect(next.routePoints[0].wpt.name).toBe('どこかの地点')
-    })
-
-    it('delta計算不可＋交差点名なし＋POI名ありなら「」で囲む', () => {
-      const state = {
-        ...initialRouteState(),
-        routePoints: [
-          makeRoutePoint(35.0, 139.0, { isAcpt: true }),
-          makeRoutePoint(35.001, 139.0, { isAcpt: true, wpt: { name: '目的地', delta: null } }),
-        ],
-      }
-      const next = routeReducer(state, {
-        type: 'INSERT_WPT',
-        payload: { trkptIndex: 0, intersectionName: null, poiName: 'どこかの公園' },
-      })
-      expect(next.routePoints[0].wpt.name).toBe('「どこかの公園」')
-    })
-
-    it('何も見つからなければ「追加したターンポイント」', () => {
-      const state = {
-        ...initialRouteState(),
-        routePoints: [
-          makeRoutePoint(35.0, 139.0, { isAcpt: true }),
-          makeRoutePoint(35.001, 139.0, { isAcpt: true, wpt: { name: '目的地', delta: null } }),
-        ],
-      }
-      const next = routeReducer(state, {
-        type: 'INSERT_WPT',
-        payload: { trkptIndex: 0, intersectionName: null, poiName: null },
-      })
-      expect(next.routePoints[0].wpt.name).toBe('追加したターンポイント')
+      const next = routeReducer(state, { type: 'INSERT_WPT', payload: { trkptIndex: 0 } })
+      expect(next.routePoints[0].wpt).toMatchObject({ name: '追加したターンポイント', delta: null, pending: true })
     })
 
     it('既にwptがある点には何もしない（stateをそのまま返す）', () => {
       const state = bendRoute()
-      const next = routeReducer(state, {
-        type: 'INSERT_WPT',
-        payload: { trkptIndex: 0, intersectionName: 'x', poiName: null },
-      })
+      const next = routeReducer(state, { type: 'INSERT_WPT', payload: { trkptIndex: 0 } })
       expect(next).toBe(state)
+    })
+
+    it('SET_TURN_NAME_BATCHでpendingを解除し交差点名を確定できる（fillWptName相当の後続処理）', () => {
+      const state = bendRoute()
+      const inserted = routeReducer(state, { type: 'INSERT_WPT', payload: { trkptIndex: 1 } })
+      const next = routeReducer(inserted, {
+        type: 'SET_TURN_NAME_BATCH',
+        payload: { assignments: [{ trkptIndex: 1, name: 'サンプル交差点を右折' }] },
+      })
+      expect(next.routePoints[1].wpt).toMatchObject({ name: 'サンプル交差点を右折', pending: false })
     })
   })
 

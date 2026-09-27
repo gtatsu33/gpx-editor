@@ -60,3 +60,58 @@ export function wptStyle(wpt) {
   }
   return ['📍', '#27ae60']
 }
+
+/**
+ * "渋谷駅前, Shibuya Scramble Crossing" のような多言語連結名から、
+ * 先頭（現地語）の名前だけを取り出す。取れなければnull。
+ */
+function primaryLocalName(raw) {
+  if (!raw) return null
+  const first = raw.split(/[,;]/)[0].trim()
+  return first || null
+}
+
+/**
+ * ルーティングAPI（OSRM互換形式）のsteps配列からターン候補を抽出する。
+ * spec.txt 9章・11章（2026-09-27改訂）。maneuverのbearing_before/after
+ * （APIが既に計算済みの値）をそのまま使い、幾何再計算は行わない。
+ * depart/arriveは除外し、|delta| < minTurnAngle の候補も除外する
+ * （detectTurnsのminDist重複排除は不要。ルーティングAPIのmaneuverは
+ * 既に1決定点1件に統合されているため）。
+ * index は呼び出し側が渡したcoords配列（両端点を含む）に対応する絶対インデックス。
+ */
+export function extractTurnsFromSteps(steps, { minTurnAngle = 45 } = {}) {
+  const turns = []
+  steps.forEach((step) => {
+    const m = step.maneuver
+    if (!m || m.type === 'depart' || m.type === 'arrive') return
+    const delta = angleDiff(m.bearing_before, m.bearing_after)
+    if (Math.abs(delta) < minTurnAngle) return
+    const index = step.intersections?.[0]?.geometry_index
+    if (index === undefined || index === null) return
+    turns.push({ index, delta, name: primaryLocalName(step.junction_name) })
+  })
+  return turns
+}
+
+/**
+ * extractTurnsFromStepsで得たturnsを、生成済みのRoutePoint配列（points、
+ * 破壊的に更新）に適用する。offsetは元のcoords配列に対するpoints[0]の
+ * 絶対インデックス（呼び出し側がcoords配列の一部をslice(1)やslice(1,-1)
+ * して使っているため）。junction_nameが取れていればpending:falseで確定名を、
+ * 取れていなければプレースホルダ名＋pending:trueを設定し、既存のOverpass
+ * バックグラウンド取得（useTurnDetectionBackground）に処理を委ねる。
+ * 適用した点はchanged:falseにする（幾何法による再検出対象から外す）。
+ */
+export function applyRoutedTurns(points, turns, offset) {
+  turns.forEach((t) => {
+    const i = t.index - offset
+    if (i < 0 || i >= points.length) return
+    points[i] = {
+      ...points[i],
+      wpt: { name: combineTurnName(t.delta, t.name), delta: t.delta, pending: !t.name },
+      changed: false,
+    }
+  })
+  return points
+}
