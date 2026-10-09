@@ -50,8 +50,8 @@ function buildInitialRoutePoints(points, elevations, waypoints, acptIndices, tur
   }
 
   if (waypoints.length && rp.length) {
-    // spec.txt 6章「既にwptを含むGPXの場合」: 最近傍trkptへの割り当て。
-    // 先頭・末尾は無ければ補うのみ（既存のwpt名は尊重する）
+    // spec.txt 6章: 既存wptは常に最近傍trkptへスナップする（手動追加wptと同列。
+    // 先頭・末尾は無ければ補うのみ、既存のwpt名は尊重する）
     let searchFrom = 0
     waypoints.forEach((w) => {
       let delta = null
@@ -63,22 +63,24 @@ function buildInitialRoutePoints(points, elevations, waypoints, acptIndices, tur
       rp[idx] = { ...rp[idx], wpt: { name: w.name || 'ターンポイント', delta } }
       searchFrom = idx
     })
+  }
+
+  if (turnAssignments && turnAssignments.length && rp.length) {
+    // spec.txt 6章: このアプリ未保存の外部ファイルの場合のみ呼び出し側（App.jsx）から
+    // 渡される。既にwptが設定されている点（上のスナップ結果含む）は上書きしない
+    turnAssignments.forEach(({ trkptIndex, delta, name }) => {
+      if (rp[trkptIndex].wpt === null) {
+        rp[trkptIndex] = { ...rp[trkptIndex], wpt: { name, delta } }
+      }
+    })
+  }
+
+  if (rp.length) {
+    // spec.txt 6章: 先頭・末尾がまだwpt未設定なら「スタート」「目的地」を補う
     if (rp[0].wpt === null) rp[0] = { ...rp[0], wpt: { name: 'スタート', delta: null } }
     if (rp[rp.length - 1].wpt === null) {
       rp[rp.length - 1] = { ...rp[rp.length - 1], wpt: { name: '目的地', delta: null } }
     }
-  } else if (turnAssignments && turnAssignments.length && rp.length) {
-    // spec.txt 6章「wptを含まないGPXの場合」: 自動検出済みのターンを適用し、
-    // 先頭・末尾は無条件で「スタート」「目的地」に上書きする
-    turnAssignments.forEach(({ trkptIndex, delta, name }) => {
-      rp[trkptIndex] = { ...rp[trkptIndex], wpt: { name, delta } }
-    })
-    rp[0] = { ...rp[0], wpt: { name: 'スタート', delta: null } }
-    rp[rp.length - 1] = { ...rp[rp.length - 1], wpt: { name: '目的地', delta: null } }
-  } else if (rp.length) {
-    // ターン自動検出の結果がまだ無い場合でも、先頭・末尾のwptだけは設定しておく
-    rp[0] = { ...rp[0], wpt: { name: 'スタート', delta: null } }
-    rp[rp.length - 1] = { ...rp[rp.length - 1], wpt: { name: '目的地', delta: null } }
   }
 
   return { rp, gradeOrg, gradeFix }

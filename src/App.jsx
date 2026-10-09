@@ -84,6 +84,10 @@ function App() {
     setUseRoutingDefault(true)
 
     const hasWpts = waypoints.length > 0
+    // spec.txt 6章: gpxnavi:acpt拡張タグが2点以上あれば、このアプリで一度保存済みの
+    // ファイルとみなす（外部ツール由来のGPXはこの拡張タグを持たない）。この場合は
+    // 自動ターン検出を実行しない（削除済みのターンポイントを復活させてしまうため）。
+    const isOwnAppFile = acptIndices.size >= 2
     let finalPoints
     if (isActualRide && !hasWpts) {
       // spec.txt 6章・10章: 実走行データはRDP間引き→マップマッチングを行う
@@ -98,14 +102,11 @@ function App() {
         payload: { matchedPoints, origElevations, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices },
       })
       finalPoints = matchedPoints
-    } else if (!hasWpts) {
+    } else {
       const points = trkpts.map((t) => [t.lat, t.lon])
-      const turnAssignments = await detectAndNameTurns(points)
+      const turnAssignments = isOwnAppFile ? [] : await detectAndNameTurns(points)
       dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, turnAssignments, eleSourceGsi, noRoutingIndices } })
       finalPoints = points
-    } else {
-      dispatch({ type: 'LOAD_PARSED_GPX', payload: { trkpts, waypoints, acptIndices, eleSourceGsi, noRoutingIndices } })
-      finalPoints = trkpts.map((t) => [t.lat, t.lon])
     }
     setStarted(true)
     // spec.txt 7-1章: 読み込み直後はルート全域が収まるよう地図中心・ズームを強制する
