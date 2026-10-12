@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contiguousRanges, deepCopyRoutePoints, makeRoutePoint, nextBoundary, prevBoundary, shouldRoute } from './routePoints.js'
+import { contiguousRanges, deepCopyRoutePoints, makeRoutePoint, nextBoundary, prevBoundary, shouldRoute, splitByCorrected } from './routePoints.js'
 
 describe('routePoints.js', () => {
   it('makeRoutePointがデフォルト値を持つ', () => {
@@ -12,6 +12,7 @@ describe('routePoints.js', () => {
       wpt: null,
       changed: true,
       useRouting: true,
+      eleStructure: 0,
     })
   })
 
@@ -52,5 +53,42 @@ describe('routePoints.js', () => {
       [9, 9],
     ])
     expect(contiguousRanges([])).toEqual([])
+  })
+
+  describe('splitByCorrected', () => {
+    const rp = (kinds) => kinds.map((k) => ({ eleStructure: k }))
+
+    it('トンネル・橋の点が無ければ区間全体を1つの通常区間にする', () => {
+      expect(splitByCorrected(rp([0, 1, 1, 0]), 0, 3)).toEqual([{ from: 0, to: 3, corrected: false }])
+    })
+
+    it('2以上が連続する範囲を、出入口の点から出入口の点までの補正区間にする', () => {
+      const r = splitByCorrected(rp([1, 1, 2, 2, 2, 1, 1]), 0, 6)
+      expect(r).toEqual([
+        { from: 0, to: 2, corrected: false },
+        { from: 2, to: 4, corrected: true },
+        { from: 4, to: 6, corrected: false },
+      ])
+    })
+
+    it('橋(3)もトンネル(2)と同様に扱う', () => {
+      const r = splitByCorrected(rp([1, 3, 3, 1]), 0, 3)
+      expect(r.filter((x) => x.corrected)).toEqual([{ from: 1, to: 2, corrected: true }])
+    })
+
+    it('孤立した1点は線にならないので補正区間にしない', () => {
+      expect(splitByCorrected(rp([1, 2, 1]), 0, 2)).toEqual([{ from: 0, to: 2, corrected: false }])
+    })
+
+    it('区間が複数あれば、それぞれ別区間にし、全体を隙間なく覆う', () => {
+      const r = splitByCorrected(rp([1, 2, 2, 1, 2, 2, 2, 1]), 0, 7)
+      expect(r.filter((x) => x.corrected)).toEqual([
+        { from: 1, to: 2, corrected: true },
+        { from: 4, to: 6, corrected: true },
+      ])
+      for (let i = 1; i < r.length; i++) expect(r[i].from).toBe(r[i - 1].to)
+      expect(r[0].from).toBe(0)
+      expect(r[r.length - 1].to).toBe(7)
+    })
   })
 })

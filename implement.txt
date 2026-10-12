@@ -361,6 +361,35 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     Promise.allでラップし、delta===nullかつ交差点名も見つからない候補のみ
     fetchSpotNameを追加で呼ぶ（他の候補は待たせない）。
 
+  【2026-10-12追加・同日改訂】トンネルの標高補正（spec.txt 13-5章）の実装
+    - 当初はOverpassで検索する手動ボタン方式だったが、Valhallaの応答にトンネル
+      情報が含まれることが分かったため、ボタン・Overpass検索を廃止し、ルーティング
+      時の判定＋標高確定時の自動補間に変更した（追加の通信なし）。
+    - lib/routing.js: extractStructureKinds(steps, coordCount) が、
+      intersections[].classesに"tunnel"を含む交差点のgeometry_indexから次の
+      交差点のgeometry_indexまでの座標を2、それ以外を1とした配列を返す（全step
+      の交差点を通して並べる。最後の交差点は自分の点のみ）。requestRouteが
+      removeConsecutiveDuplicates(coords, turns, kinds)で重複座標の統合とあわせて
+      kindsを揃え、calcRouteSegmentの戻り値 { coords, turns, kinds } に含める
+      （直線フォールバック時はkinds=null）。
+    - lib/turns.js applyRoutedTurns(points, turns, offset, kinds): kindsが渡されたとき、
+      各点のeleStructureを kinds[j+offset] に設定する（reducerの各action、
+      ターン適用の直後に同じoffsetで呼ぶ）。省略時は0のまま。
+    - RoutePointのeleStructureは数値（0未検証/1地表/2トンネル/3橋、既定0、表示専用・
+      GPX非保存）。
+    - lib/structures.js: structureRuns(kinds)（2以上で3点以上連続する範囲）と
+      interpolateStructureElevations(points, eleFix, kinds)（累積距離比例の直線補間、
+      小数1桁、出入口のeleFixがnullなら変更しない。冪等）。
+    - useRouteReducer.js FINALIZE_ELE_FIX: 補間→スパイク除去→補間の順で適用し、
+      結果が既存と全点一致するときはstateをそのまま返す（無限ループ防止の既存仕様）。
+      SaveDialog.jsxの標高整合性チェックも同じ手順。
+    - 赤表示: App.jsxのtrkptSegments作成時にroutePoints.js splitByCorrected(rp, s, e)
+      で境界点区間をさらに分割し（eleStructureが2以上で連続する2点以上の範囲を、
+      出入口の点から出入口の点まで）、corrected:trueの区間をMapView.jsxが#e74c3cで描画する。
+      標高グラフ（ElevationChart.jsx）も同じsplitByCorrectedで全点を分割し、corrected:trueの
+      範囲のele_fixの折れ線を#e74c3cで黒の実線の上に重ね描きする（v1.16.1）。
+    - 検証: 実データ（PICC_AUTUMN_RIDE2026_ACT）の150〜190番・55〜70番を再ルーティング
+      した結果、トンネル判定の範囲がOverpass検索の結果（62-64、163-165、167-177）と一致した。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 3. 技術スタック全体方針
@@ -483,6 +512,13 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
   frontend/index.html の該当関数（_near, _nearAll, _clusterCandidates,
   _showCandidatePopup 等）をほぼそのままJSモジュールとして移植する。
 
+  【2026-10-12追記】複数候補ポップアップは2段階メニュー化（spec.txt 7-2章）。
+  openActionPopup(map, latlng, items) は項目に submenu（項目配列）を持てる。
+  submenu付き項目のクリックで同一ポップアップ内を差し替え、末尾に「◀ 戻る」を
+  自動付与する。highlight（[lat,lon]）付き項目はホバー中・サブメニュー表示中に
+  L.circleMarker（interactive:false）で地図上にハイライトし、ポップアップの
+  'remove'イベントで除去する。単一trkpt用の項目は singleTrkptItems() に集約。
+
   地図⇔標高グラフの相互連携（spec.txt 7-3章）は、元実装ではiframe越しの
   postMessageブリッジが必要だった（Streamlitコンポーネントのサンドボックス
   制約のため）が、SPAでは同一ドキュメント内なので不要になる。ホバー中の
@@ -601,6 +637,16 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
     格納する汎用的な仕組みにした（bicycle以外のcostingでも将来利用可能）。
     pedestrianFallback: true（既定）の場合は何も指定せず、既存動作を
     変えていない。
+
+    【2026-10-12追加・バグ修正: 連続する同一座標の除去】
+    Valhallaは始点・終点が道路形状の頂点と一致すると同一座標を2回返すことが
+    ある（実測: トラック途中の点を端点にして14回試し、始点3回・終点6回）。
+    requestRoute()が removeConsecutiveDuplicates(coords, turns) で連続する
+    同一座標を除去し、turns[].index（geometry_index）を除去後の座標列に合わせて
+    振り直す。あわせて turns.js の detectTurns() も、連続する同一座標を1点に
+    まとめて判定し、返すindexは元配列のものにする（ルーティング以外の
+    経路に重複点があっても、長さ0区間のベアリング0°扱いで偽のターンを
+    作らないための保険）。
 
     【2026-09-27追加・案A: maneuverからのターンポイント自動生成】
     requestRoute()の戻り値に turns を追加した（{ coords, snapDistance, turns }）。

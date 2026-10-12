@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { calcRouteSegment } from './routing.js'
+import { calcRouteSegment, extractStructureKinds, removeConsecutiveDuplicates } from './routing.js'
 
 function jsonResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body }
@@ -20,6 +20,38 @@ describe('routing.js calcRouteSegment', () => {
     const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
     expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
     expect(result.turns).toEqual([])
+  })
+
+  it('始点が重複して返ってきたら除去し、turnsのindexも振り直す', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 'Ok',
+        routes: [
+          {
+            geometry: { coordinates: [[139.0, 35.0], [139.0, 35.0], [139.001, 35.001], [139.002, 35.001]] },
+            legs: [
+              {
+                steps: [
+                  {
+                    maneuver: { type: 'turn', bearing_before: 0, bearing_after: 90 },
+                    intersections: [{ geometry_index: 2 }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })
+    )
+    const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.002]], { fetchImpl, pedestrianFallback: false, ...noWaitOpts })
+    expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001], [35.001, 139.002]])
+    expect(result.turns).toHaveLength(1)
+    expect(result.turns[0].index).toBe(1)
+  })
+
+  it('終点が重複して返ってきても除去する', () => {
+    const r = removeConsecutiveDuplicates([[1, 1], [2, 2], [2, 2]], [])
+    expect(r.coords).toEqual([[1, 1], [2, 2]])
   })
 
   it('APIがcode!=="Ok"を返したら入力をそのまま返す（フォールバック）', async () => {
@@ -215,5 +247,27 @@ describe('routing.js calcRouteSegment', () => {
       const result = await calcRouteSegment([[35.0, 139.0], [35.001, 139.001]], { fetchImpl, ...noWaitOpts })
       expect(result.coords).toEqual([[35.0, 139.0], [35.001, 139.001]])
     })
+  })
+})
+
+describe('extractStructureKinds / removeConsecutiveDuplicatesのkinds（13-5章）', () => {
+  const ix = (geometry_index, classes) => ({ geometry_index, ...(classes ? { classes } : {}) })
+
+  it('tunnelクラスの交差点から次の交差点までを出入口込みで2にする', () => {
+    const steps = [{ intersections: [ix(0), ix(2, ['tunnel']), ix(5), ix(7)] }]
+    expect(extractStructureKinds(steps, 8)).toEqual([1, 1, 2, 2, 2, 2, 1, 1])
+  })
+  it('stepをまたいでも次の交差点を参照し、最後の交差点は自分の点のみ', () => {
+    const steps = [{ intersections: [ix(0, ['tunnel']), ix(1)] }, { intersections: [ix(3, ['tunnel'])] }]
+    expect(extractStructureKinds(steps, 5)).toEqual([2, 2, 1, 2, 1])
+  })
+  it('トンネルが無ければ全て1', () => {
+    expect(extractStructureKinds([{ intersections: [ix(0), ix(2)] }], 3)).toEqual([1, 1, 1])
+  })
+  it('重複座標を統合するとkindsも揃え、統合先のいずれかが2なら2', () => {
+    const coords = [[1, 1], [2, 2], [2, 2], [3, 3]]
+    const r = removeConsecutiveDuplicates(coords, [], [1, 1, 2, 1])
+    expect(r.coords).toEqual([[1, 1], [2, 2], [3, 3]])
+    expect(r.kinds).toEqual([1, 2, 1])
   })
 })

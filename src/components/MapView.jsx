@@ -44,30 +44,88 @@ function arrowIcon(deg) {
   return L.divIcon({ html: svg, iconSize: [24, 24], iconAnchor: [12, 12], className: '' })
 }
 
-function makeActionButton(label, onClick) {
+function makeActionButton(label, onClick, onHover) {
   const btn = document.createElement('button')
   btn.textContent = label
   btn.style.cssText =
     'display:block;width:100%;text-align:left;cursor:pointer;border:none;background:none;' +
     'padding:5px 4px;font-family:sans-serif;font-size:13px;line-height:1.5;border-radius:3px;'
-  btn.addEventListener('mouseenter', () => (btn.style.background = '#f0f0f0'))
-  btn.addEventListener('mouseleave', () => (btn.style.background = 'none'))
+  btn.addEventListener('mouseenter', () => {
+    btn.style.background = '#f0f0f0'
+    onHover?.(true)
+  })
+  btn.addEventListener('mouseleave', () => {
+    btn.style.background = 'none'
+    onHover?.(false)
+  })
   btn.addEventListener('click', onClick)
   return btn
 }
 
+/**
+ * アクションメニューのポップアップを開く。spec.txt 7-2章。
+ * items の各要素: { label, onClick?, submenu?, highlight? }
+ *  - submenu（items配列）を持つ項目は、クリックで同じポップアップ内を
+ *    そのサブメニューに差し替える（末尾に「◀ 戻る」を自動付与）
+ *  - highlight（[lat,lon]）を持つ項目は、ホバー中およびそのサブメニュー表示中、
+ *    地図上にその点をハイライトする
+ */
 function openActionPopup(map, latlng, items) {
   const container = document.createElement('div')
   container.style.minWidth = '180px'
-  items.forEach(({ label, onClick }) => {
-    container.appendChild(
-      makeActionButton(label, () => {
-        map.closePopup()
-        onClick()
-      })
-    )
-  })
-  L.popup({ closeButton: true, closeOnClick: false, minWidth: 180 }).setLatLng(latlng).setContent(container).openOn(map)
+  const popup = L.popup({ closeButton: true, closeOnClick: false, minWidth: 180 }).setLatLng(latlng).setContent(container)
+
+  let highlightLayer = null
+  function setHighlight(pt) {
+    if (highlightLayer) {
+      map.removeLayer(highlightLayer)
+      highlightLayer = null
+    }
+    if (pt) {
+      highlightLayer = L.circleMarker(pt, {
+        radius: 12,
+        color: '#e74c3c',
+        weight: 3,
+        fillColor: '#e74c3c',
+        fillOpacity: 0.25,
+        interactive: false,
+      }).addTo(map)
+    }
+  }
+
+  function show(list, sticky = null) {
+    setHighlight(sticky)
+    container.replaceChildren()
+    list.forEach((item) => {
+      const btn = makeActionButton(
+        item.label,
+        (e) => {
+          // サブメニュー切替でクリック済みボタンをDOMから外すと、Leafletの
+          // 「ポップアップ内クリックは無視」判定（親要素をたどる）が効かず、
+          // 地図クリック（ゴール延伸）として処理されてしまう。先に伝播を止める。
+          L.DomEvent.stopPropagation(e)
+          if (item.submenu) {
+            show(
+              [...item.submenu, { label: '◀ 戻る', onClick: () => show(list, sticky), keepOpen: true }],
+              item.highlight ?? null
+            )
+          } else if (item.keepOpen) {
+            item.onClick()
+          } else {
+            map.closePopup()
+            item.onClick()
+          }
+        },
+        item.highlight ? (on) => setHighlight(on ? item.highlight : sticky) : undefined
+      )
+      container.appendChild(btn)
+    })
+    popup.update()
+  }
+
+  popup.on('remove', () => setHighlight(null))
+  show(items)
+  popup.openOn(map)
 }
 
 /**
@@ -96,14 +154,21 @@ const MapView = forwardRef(function MapView(
     dataRef.current.onEvent({ ...payload, center: { lat: c.lat, lng: c.lng }, zoom: map.getZoom(), ts: Date.now() })
   }
 
-  function showSingleTrkptMenu(ni, lat, lng, trkpts) {
-    const map = mapRef.current
-    openActionPopup(map, [trkpts[ni][0], trkpts[ni][1]], [
+  function singleTrkptItems(ni, lat, lng, { withWpt = true, withCancel = true } = {}) {
+    const items = [
       { label: '📍 ゴールを延長する', onClick: () => emitEvent({ type: 'dialog_result', action: 'extend', lat, lng, nearestTrkptIdx: ni }) },
       { label: '⚓ アンカーポイントを挿入する', onClick: () => emitEvent({ type: 'dialog_result', action: 'acpt', lat, lng, nearestTrkptIdx: ni }) },
-      { label: '🔀 ターンポイントを追加する', onClick: () => emitEvent({ type: 'dialog_result', action: 'wpt', lat, lng, nearestTrkptIdx: ni }) },
-      { label: '✖ キャンセル', onClick: () => {} },
-    ])
+    ]
+    if (withWpt) {
+      items.push({ label: '🔀 ターンポイントを追加する', onClick: () => emitEvent({ type: 'dialog_result', action: 'wpt', lat, lng, nearestTrkptIdx: ni }) })
+    }
+    if (withCancel) items.push({ label: '✖ キャンセル', onClick: () => {} })
+    return items
+  }
+
+  function showSingleTrkptMenu(ni, lat, lng, trkpts) {
+    const map = mapRef.current
+    openActionPopup(map, [trkpts[ni][0], trkpts[ni][1]], singleTrkptItems(ni, lat, lng))
   }
 
   // isTrackClick=true（トラックライン自体のクリック）の場合、20pxの候補閾値内に
@@ -135,20 +200,29 @@ const MapView = forwardRef(function MapView(
     wpts.forEach((w, i) => trkptToWptIdx.set(w.trkptIdx, i))
 
     if (reps.length > 1) {
-      openActionPopup(
-        map,
-        [lat, lng],
-        reps.map((r) => {
-          const wi = trkptToWptIdx.get(r.idx)
-          if (wi !== undefined) {
-            return { label: `✏ 「${wpts[wi].name}」を編集`, onClick: () => emitEvent({ type: 'wpt_click', wptIdx: wi }) }
-          }
+      // 1段目: どの地点か（ルート距離km）／2段目: その地点への操作（spec.txt 7-2章）
+      const items = reps.map((r) => {
+        const km = (cum[r.idx] / 1000).toFixed(2)
+        const pt = [trkpts[r.idx][0], trkpts[r.idx][1]]
+        const wi = trkptToWptIdx.get(r.idx)
+        if (wi !== undefined) {
           return {
-            label: '＋ 新wptを追加',
-            onClick: () => emitEvent({ type: 'dialog_result', action: 'wpt', lat, lng, nearestTrkptIdx: r.idx }),
+            label: `✏ 「${wpts[wi].name}」(${km}km)`,
+            highlight: pt,
+            submenu: [
+              { label: '✏ wptを編集する', onClick: () => emitEvent({ type: 'wpt_click', wptIdx: wi }) },
+              ...singleTrkptItems(r.idx, lat, lng, { withWpt: false }),
+            ],
           }
-        })
-      )
+        }
+        return {
+          label: `📍 ${km}km 地点`,
+          highlight: pt,
+          submenu: singleTrkptItems(r.idx, lat, lng, { withCancel: false }),
+        }
+      })
+      items.push({ label: '✖ キャンセル', onClick: () => {} })
+      openActionPopup(map, [lat, lng], items)
     } else {
       showSingleTrkptMenu(reps[0].idx, lat, lng, trkpts)
     }
@@ -241,11 +315,12 @@ const MapView = forwardRef(function MapView(
     }
 
     // spec.txt 7-1章（2026-09-13追加）: ルート検索OFFの区間（直線）は破線で
-    // 描画し、ルート検索された区間（実線）と視覚的に区別する
+    // 描画し、ルート検索された区間（実線）と視覚的に区別する。
+    // トンネル区間（corrected、spec.txt 13-5章）は赤で描画する
     const segments = trkptSegments && trkptSegments.length ? trkptSegments : trkpts.length > 1 ? [{ points: trkpts, routed: true }] : []
     segments.forEach((seg) => {
       const poly = L.polyline(seg.points, {
-        color: '#3498db',
+        color: seg.corrected ? '#e74c3c' : '#3498db',
         weight: 4,
         opacity: 0.8,
         dashArray: seg.routed ? null : '6 6',

@@ -15,7 +15,7 @@ import { useAuth } from './hooks/useAuth.js'
 import { parseGpx } from './lib/gpx.js'
 import { haversine } from './lib/geo.js'
 import { combineTurnName, detectTurns, wptStyle } from './lib/turns.js'
-import { contiguousRanges, nextBoundary, prevBoundary, shouldRoute } from './lib/routePoints.js'
+import { contiguousRanges, nextBoundary, prevBoundary, shouldRoute, splitByCorrected } from './lib/routePoints.js'
 import { rdpSimplify } from './lib/rdp.js'
 import { calcRouteSegment } from './lib/routing.js'
 import { fetchIntersectionNames } from './lib/overpass.js'
@@ -329,17 +329,24 @@ function App() {
     const trkptsForMap = rp.map((p) => [p.lat, p.lon])
 
     // spec.txt 7-1章（2026-09-13追加）: ルート検索OFFの区間（直線）を
-    // 破線で描画するため、境界点（acptまたはwpt）ごとにポリラインを分割する
+    // 破線で描画するため、境界点（acptまたはwpt）ごとにポリラインを分割する。
+    // さらにトンネル区間（構造種別2・3、spec.txt 13-5章）は別ポリライン
+    // （corrected: true）に分け、赤で描画する
     const trkptSegments = []
+    const pushSegments = (s, e, routed) => {
+      splitByCorrected(rp, s, e).forEach((part) => {
+        trkptSegments.push({ points: trkptsForMap.slice(part.from, part.to + 1), routed, corrected: part.corrected })
+      })
+    }
     if (rp.length > 1) {
       const boundaryIndices = rp.map((p, i) => (p.isAcpt || p.wpt !== null ? i : null)).filter((i) => i !== null)
       if (boundaryIndices.length < 2) {
-        trkptSegments.push({ points: trkptsForMap, routed: true })
+        pushSegments(0, rp.length - 1, true)
       } else {
         for (let k = 0; k < boundaryIndices.length - 1; k++) {
           const s = boundaryIndices[k]
           const e = boundaryIndices[k + 1]
-          trkptSegments.push({ points: trkptsForMap.slice(s, e + 1), routed: shouldRoute(rp[s], rp[e]) })
+          pushSegments(s, e, shouldRoute(rp[s], rp[e]))
         }
       }
     }

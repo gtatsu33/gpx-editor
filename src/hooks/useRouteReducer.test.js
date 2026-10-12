@@ -52,6 +52,14 @@ describe('routeReducer', () => {
       expect(next.undoSnapshot).toEqual(state.routePoints)
     })
 
+    it('区間のkinds（構造種別）を新しい点のeleStructureに反映する', () => {
+      const state = baseFivePointRoute()
+      const segment = { ...seg([[35.004, 139.0], [35.005, 139.0], [35.006, 139.0]]), kinds: [1, 2, 2] }
+      const next = routeReducer(state, { type: 'EXTEND', payload: { segmentPoints: segment } })
+      expect(next.routePoints.slice(5).map((p) => p.eleStructure)).toEqual([2, 2])
+      expect(next.routePoints[0].eleStructure).toBe(0)
+    })
+
     it('旧・目的地wptを解除する', () => {
       const state = baseFivePointRoute()
       const next = routeReducer(state, {
@@ -577,6 +585,34 @@ describe('routeReducer', () => {
       const next = routeReducer(state, { type: 'FINALIZE_ELE_FIX' })
       expect(next.routePoints.map((p) => p.eleFix)).toEqual(values)
       expect(next.gradeFix).toEqual({ max: expect.any(Number), min: 0 })
+    })
+  })
+
+  describe('FINALIZE_ELE_FIXのトンネル補間（13-5章）', () => {
+    it('構造種別2の連続区間の内部を、出入口の標高から補間する', () => {
+      let state = baseFivePointRoute()
+      state = {
+        ...state,
+        routePoints: state.routePoints.map((p, i) => ({ ...p, eleStructure: i >= 1 && i <= 3 ? 2 : 1 })),
+      }
+      state = routeReducer(state, {
+        type: 'SET_ELE_FIX_BATCH',
+        payload: { assignments: [100, 100, 300, 100, 100].map((value, trkptIndex) => ({ trkptIndex, value })) },
+      })
+      const next = routeReducer(state, { type: 'FINALIZE_ELE_FIX' })
+      expect(next.routePoints.map((p) => p.eleFix)).toEqual([100, 100, 100, 100, 100])
+      // 補間結果が確定済みなら再実行しても変化しない
+      expect(routeReducer(next, { type: 'FINALIZE_ELE_FIX' })).toBe(next)
+    })
+
+    it('未検証(0)・地表(1)の点は補間しない', () => {
+      let state = baseFivePointRoute()
+      state = routeReducer(state, {
+        type: 'SET_ELE_FIX_BATCH',
+        payload: { assignments: [100, 101, 102, 103, 104].map((value, trkptIndex) => ({ trkptIndex, value })) },
+      })
+      const next = routeReducer(state, { type: 'FINALIZE_ELE_FIX' })
+      expect(next.routePoints.map((p) => p.eleFix)).toEqual([100, 101, 102, 103, 104])
     })
   })
 

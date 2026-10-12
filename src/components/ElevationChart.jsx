@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { cumulativeDistances } from '../lib/elevation.js'
+import { splitByCorrected } from '../lib/routePoints.js'
 import { nearestIndexAtDistance } from '../lib/mapInteractions.js'
 
 const WIDTH = 1000
@@ -42,6 +43,14 @@ export default function ElevationChart({ routePoints, hoveredKm, onHoverKm, onCl
   const buildPath = (vals) =>
     fillSeries(vals, eleMin)
       .map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(cumKm[i]).toFixed(1)},${yScale(v).toFixed(1)}`)
+      .join(' ')
+
+  // spec.txt 13-5章: トンネル区間（出入口から出入口まで）の国土地理院標高を赤で重ね描きする
+  const tunnelRanges = splitByCorrected(routePoints, 0, routePoints.length - 1).filter((r) => r.corrected)
+  const buildRangePath = (vals, from, to) =>
+    fillSeries(vals, eleMin)
+      .slice(from, to + 1)
+      .map((v, k) => `${k === 0 ? 'M' : 'L'}${xScale(cumKm[from + k]).toFixed(1)},${yScale(v).toFixed(1)}`)
       .join(' ')
 
   const hasOrg = orgVals.some((v) => v !== null && v !== undefined)
@@ -125,8 +134,12 @@ export default function ElevationChart({ routePoints, hoveredKm, onHoverKm, onCl
         </g>
       ))}
 
-      {hasOrg && <path d={buildPath(orgVals)} fill="none" stroke="black" strokeWidth={1.5} strokeDasharray="4,3" />}
-      {hasFix && <path d={buildPath(fixVals)} fill="none" stroke="black" strokeWidth={1.5} />}
+      {hasOrg && <path d={buildPath(orgVals)} fill="none" stroke="black" strokeWidth={3} strokeDasharray="8,6" />}
+      {hasFix && <path d={buildPath(fixVals)} fill="none" stroke="black" strokeWidth={3} />}
+      {hasFix &&
+        tunnelRanges.map((r) => (
+          <path key={r.from} d={buildRangePath(fixVals, r.from, r.to)} fill="none" stroke="#e74c3c" strokeWidth={3} />
+        ))}
 
       {hoveredKm !== null && hoveredKm !== undefined && (
         <>

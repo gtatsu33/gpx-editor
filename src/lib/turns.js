@@ -4,7 +4,19 @@ import { angleDiff, calculateBearing, haversine } from './geo.js'
  * 角度法によるターン検出。points は [[lat, lon], ...] 形式。
  * spec.txt 11章のアルゴリズムに対応。
  */
-export function detectTurns(points, { minTurnAngle = 45, minDist = 100, smooth = 1 } = {}) {
+export function detectTurns(allPoints, { minTurnAngle = 45, minDist = 100, smooth = 1 } = {}) {
+  // 連続する同一座標は1点にまとめて判定する（長さ0の区間は方位が0°扱いになり、
+  // 直進でも偽のターンを作るため。spec.txt 11-2章、2026-10-12追加）。
+  // 戻り値のindexは元配列（allPoints）でのインデックス（重複の先頭）に戻す。
+  const points = []
+  const origIndex = []
+  allPoints.forEach((p, i) => {
+    const prev = points[points.length - 1]
+    if (!prev || prev[0] !== p[0] || prev[1] !== p[1]) {
+      points.push(p)
+      origIndex.push(i)
+    }
+  })
   const n = points.length
   const candidates = []
   for (let i = smooth; i < n - smooth; i++) {
@@ -15,7 +27,7 @@ export function detectTurns(points, { minTurnAngle = 45, minDist = 100, smooth =
     const bearingOut = calculateBearing(X[0], X[1], B[0], B[1])
     const turn = angleDiff(bearingIn, bearingOut)
     if (Math.abs(turn) >= minTurnAngle) {
-      candidates.push({ lat: X[0], lon: X[1], delta: turn, index: i })
+      candidates.push({ lat: X[0], lon: X[1], delta: turn, index: origIndex[i] })
     }
   }
 
@@ -103,7 +115,12 @@ export function extractTurnsFromSteps(steps, { minTurnAngle = 45 } = {}) {
  * バックグラウンド取得（useTurnDetectionBackground）に処理を委ねる。
  * 適用した点はchanged:falseにする（幾何法による再検出対象から外す）。
  */
-export function applyRoutedTurns(points, turns, offset) {
+export function applyRoutedTurns(points, turns, offset, kinds = null) {
+  if (kinds) {
+    points.forEach((p, j) => {
+      points[j] = { ...p, eleStructure: kinds[j + offset] ?? 0 }
+    })
+  }
   turns.forEach((t) => {
     const i = t.index - offset
     if (i < 0 || i >= points.length) return

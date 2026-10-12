@@ -24,6 +24,22 @@ describe('turns.js (Python版 gpxconverter.py との突き合わせ)', () => {
 
 // spec.txt 9章・11章（2026-09-27追加）: ルーティングAPI応答のmaneuverから
 // ターン候補を抽出する方式（案A）。
+describe('detectTurns: 連続する同一座標', () => {
+  // 南へ直進するルートの途中に重複点がある場合、偽のターンを作らない
+  const straight = [[35.0003, 139], [35.0002, 139], [35.0001, 139], [35.0001, 139], [35.0, 139]]
+
+  it('直進ルートの重複点で偽のターンを検出しない', () => {
+    expect(detectTurns(straight)).toEqual([])
+  })
+
+  it('重複点があっても実際のコーナーは検出し、indexは元配列のものを返す', () => {
+    const pts = [[35.002, 139], [35.001, 139], [35.001, 139], [35.001, 139.001]]
+    const turns = detectTurns(pts)
+    expect(turns).toHaveLength(1)
+    expect(turns[0].index).toBe(1)
+  })
+})
+
 describe('extractTurnsFromSteps', () => {
   function step(overrides) {
     return {
@@ -70,6 +86,15 @@ describe('applyRoutedTurns', () => {
   function pts(n) {
     return Array.from({ length: n }, (_, i) => makeRoutePoint(35 + i, 139, { changed: true }))
   }
+
+  it('kindsを渡すと、offsetを考慮して各点の構造種別(eleStructure)を設定する。省略時は変更しない', () => {
+    const points = pts(3)
+    applyRoutedTurns(points, [], 1, [1, 1, 2, 2])
+    expect(points.map((p) => p.eleStructure)).toEqual([1, 2, 2])
+    const other = pts(2)
+    applyRoutedTurns(other, [], 0)
+    expect(other.map((p) => p.eleStructure)).toEqual([0, 0])
+  })
 
   it('junction_name有りは確定名（pending:false）で即時反映し、changedをfalseにする', () => {
     const points = pts(3)

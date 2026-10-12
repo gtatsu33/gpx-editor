@@ -1,10 +1,42 @@
-/** spec.txt 5-1章のRoutePoint構造を生成する。 */
+/**
+ * spec.txt 5-1章のRoutePoint構造を生成する。
+ * eleStructure: 構造種別（13-5章）。0=未検証 / 1=地表 / 2=トンネル / 3=橋。
+ * 2・3の連続区間は標高を補間で補正し、地図上で赤く描く（GPXには保存しない）。
+ */
 export function makeRoutePoint(
   lat,
   lon,
-  { eleOrg = null, eleFix = null, isAcpt = false, wpt = null, changed = true, useRouting = true } = {}
+  { eleOrg = null, eleFix = null, isAcpt = false, wpt = null, changed = true, useRouting = true, eleStructure = 0 } = {}
 ) {
-  return { lat, lon, eleOrg, eleFix, isAcpt, wpt, changed, useRouting }
+  return { lat, lon, eleOrg, eleFix, isAcpt, wpt, changed, useRouting, eleStructure }
+}
+
+/**
+ * rp[s]〜rp[e]（両端含む）の区間を、トンネル・橋（eleStructureが2以上）の点が連続する
+ * 範囲とそれ以外に分割する。spec.txt 7-1章・13-5章。トンネル区間は出入口の点から
+ * 出入口の点まで（2点以上連続する範囲）。
+ * 戻り値: [{ from, to, corrected }]（隣り合う区間は端点を共有する）
+ */
+export function splitByCorrected(rp, s, e) {
+  const out = []
+  let cur = s
+  let i = s
+  while (i <= e) {
+    if (!(rp[i].eleStructure >= 2)) {
+      i += 1
+      continue
+    }
+    let j = i
+    while (j + 1 <= e && rp[j + 1].eleStructure >= 2) j += 1
+    if (j > i) {
+      if (i > cur) out.push({ from: cur, to: i, corrected: false })
+      out.push({ from: i, to: j, corrected: true })
+      cur = j
+    }
+    i = j + 1
+  }
+  if (cur < e || out.length === 0) out.push({ from: cur, to: e, corrected: false })
+  return out
 }
 
 /**

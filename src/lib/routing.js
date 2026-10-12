@@ -23,6 +23,53 @@ const SNAP_DISTANCE_THRESHOLD_M = 3
 // という重み付けの調整であり、絶対的な除外ではない。
 const USE_ROADS_AVOID_SIDEWALKS = 1
 
+/**
+ * 連続する同一座標を除去し、turns[].index（元coordsに対する絶対インデックス）を
+ * 除去後のcoordsに合わせて振り直す。spec.txt 9章（2026-10-12追加）。
+ * Valhallaは始点・終点が道路形状の頂点と一致すると同一座標を2回返すことがあり
+ * （実測）、そのまま使うと長さ0の区間が偽のターンを作る。
+ */
+export function removeConsecutiveDuplicates(coords, turns, kinds = null) {
+  const kept = []
+  const keptKinds = []
+  const newIndexOf = []
+  coords.forEach((c, i) => {
+    const prev = kept[kept.length - 1]
+    if (!prev || prev[0] !== c[0] || prev[1] !== c[1]) {
+      kept.push(c)
+      keptKinds.push(kinds ? kinds[i] : 1)
+    } else if (kinds) {
+      // 統合された座標は、いずれかがトンネルならトンネルとする
+      keptKinds[keptKinds.length - 1] = Math.max(keptKinds[keptKinds.length - 1], kinds[i])
+    }
+    newIndexOf.push(kept.length - 1)
+  })
+  return {
+    coords: kept,
+    turns: turns.map((t) => ({ ...t, index: newIndexOf[t.index] ?? t.index })),
+    kinds: kinds ? keptKinds : null,
+  }
+}
+
+/**
+ * Valhallaの応答（OSRM形式）のintersections[].classes（"tunnel"）から、座標ごとの
+ * 構造種別を作る。spec.txt 13-5章。0=未検証/1=地表/2=トンネル/3=橋。
+ * geometry_indexの交差点がtunnelクラスを持つ場合、その交差点から次の交差点までの
+ * 辺がトンネルで、両端の座標（出入口）を含めて2とする。橋の情報は応答に含まれないため
+ * 3は付けない（それ以外は1）。
+ */
+export function extractStructureKinds(steps, coordCount) {
+  const kinds = new Array(coordCount).fill(1)
+  const ix = steps.flatMap((s) => s.intersections ?? []).filter((x) => Number.isInteger(x.geometry_index))
+  ix.forEach((x, k) => {
+    if (!x.classes?.includes('tunnel')) return
+    const from = x.geometry_index
+    const to = k + 1 < ix.length ? ix[k + 1].geometry_index : from
+    for (let i = from; i <= to && i < coordCount; i++) kinds[i] = 2
+  })
+  return kinds
+}
+
 async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now, costingOptions }) {
   const wait = MIN_INTERVAL_MS - (now() - lastCallAt)
   if (wait > 0) await sleep(wait)
@@ -49,13 +96,17 @@ async function requestRoute(points, costing, { fetchImpl, timeoutMs, sleep, now,
     if (!res.ok) return null
     const data = await res.json()
     if (data.code !== 'Ok') return null
-    const coords = data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon])
+    const rawCoords = data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon])
     const snapDistance = Math.max(0, ...(data.waypoints ?? []).map((w) => w.distance ?? 0))
     // spec.txt 9章・11章（2026-09-27追加）: 応答のmaneuverからターン候補を
     // 同時に抽出する。indexはcoords配列（両端点を含む）に対応する絶対インデックス。
     const steps = (data.routes[0].legs ?? []).flatMap((leg) => leg.steps ?? [])
-    const turns = extractTurnsFromSteps(steps)
-    return { coords, snapDistance, turns }
+    const { coords, turns, kinds } = removeConsecutiveDuplicates(
+      rawCoords,
+      extractTurnsFromSteps(steps),
+      extractStructureKinds(steps, rawCoords.length)
+    )
+    return { coords, snapDistance, turns, kinds }
   } catch {
     return null
   }
@@ -97,7 +148,8 @@ function routeLength(coords) {
  *
  * 戻り値: { coords, turns }。turnsは採用された経路のmaneuverから抽出した
  * ターン候補（spec.txt 9章・11章、2026-09-27追加）。coordsはindex空間を共有する
- * ([[lat,lon],...]、両端点を含む)。フォールバック時（両costing失敗）はturns=[]。
+ * ([[lat,lon],...]、両端点を含む)。フォールバック時（両costing失敗）はturns=[]、kinds=null（未検証）。
+ * kindsは座標ごとの構造種別（extractStructureKinds）。
  */
 export async function calcRouteSegment(
   points,
@@ -108,7 +160,7 @@ export async function calcRouteSegment(
   const bicycleResult = await requestRoute(points, 'bicycle', { ...opts, costingOptions: bicycleCostingOptions })
 
   if (!pedestrianFallback) {
-    return bicycleResult ? { coords: bicycleResult.coords, turns: bicycleResult.turns } : { coords: points, turns: [] }
+    return bicycleResult ? pick(bicycleResult) : { coords: points, turns: [], kinds: null }
   }
 
   const pedestrianResult = await requestRoute(points, 'pedestrian', opts)
@@ -123,9 +175,9 @@ export async function calcRouteSegment(
       : pick(bicycleResult)
   }
   const chosen = bicycleResult ?? pedestrianResult
-  return chosen ? pick(chosen) : { coords: points, turns: [] }
+  return chosen ? pick(chosen) : { coords: points, turns: [], kinds: null }
 }
 
 function pick(result) {
-  return { coords: result.coords, turns: result.turns }
+  return { coords: result.coords, turns: result.turns, kinds: result.kinds }
 }

@@ -1,6 +1,7 @@
 import { useReducer } from 'react'
 import { angleDiff, calculateBearing, nearestPointIndexFrom } from '../lib/geo.js'
 import { cleanElevationSpikes, computeGradeStats } from '../lib/elevation.js'
+import { interpolateStructureElevations } from '../lib/structures.js'
 import { deepCopyRoutePoints, makeRoutePoint, nextBoundary, prevBoundary } from '../lib/routePoints.js'
 import { applyRoutedTurns, combineTurnName } from '../lib/turns.js'
 
@@ -135,7 +136,7 @@ export function routeReducer(state, action) {
       }
       const tail = segmentPoints.coords.slice(1)
       const newPts = tail.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === tail.length - 1, changed: true }))
-      applyRoutedTurns(newPts, segmentPoints.turns, 1)
+      applyRoutedTurns(newPts, segmentPoints.turns, 1, segmentPoints.kinds)
       if (newPts.length) {
         newPts[newPts.length - 1] = {
           ...newPts[newPts.length - 1],
@@ -166,7 +167,7 @@ export function routeReducer(state, action) {
         const nxtIdx = nextBoundary(trkptIdx, rp)
         const head = forwardSegment.coords.slice(0, -1)
         const newPts = head.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === 0, changed: true }))
-        applyRoutedTurns(newPts, forwardSegment.turns, 0)
+        applyRoutedTurns(newPts, forwardSegment.turns, 0, forwardSegment.kinds)
         if (newPts.length) {
           newPts[0] = { ...newPts[0], wpt: { name: 'スタート', delta: null }, changed: false, useRouting: draggedUseRouting }
         }
@@ -175,7 +176,7 @@ export function routeReducer(state, action) {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const tail = backwardSegment.coords.slice(1)
         const newPts = tail.map((pt, j) => makeRoutePoint(pt[0], pt[1], { isAcpt: j === tail.length - 1, changed: true }))
-        applyRoutedTurns(newPts, backwardSegment.turns, 1)
+        applyRoutedTurns(newPts, backwardSegment.turns, 1, backwardSegment.kinds)
         if (newPts.length) {
           newPts[newPts.length - 1] = {
             ...newPts[newPts.length - 1],
@@ -189,9 +190,9 @@ export function routeReducer(state, action) {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
         const bwdTail = backwardSegment.coords.slice(1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(bwdTail, backwardSegment.turns, 1)
+        applyRoutedTurns(bwdTail, backwardSegment.turns, 1, backwardSegment.kinds)
         const fwdMid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(fwdMid, forwardSegment.turns, 1)
+        applyRoutedTurns(fwdMid, forwardSegment.turns, 1, forwardSegment.kinds)
         const newPts = [...bwdTail, ...fwdMid]
         const acptPos = bwdTail.length - 1
         if (acptPos >= 0 && acptPos < newPts.length) {
@@ -246,7 +247,7 @@ export function routeReducer(state, action) {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
         const newMid = middleSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(newMid, middleSegment.turns, 1)
+        applyRoutedTurns(newMid, middleSegment.turns, 1, middleSegment.kinds)
         newRp = [...rp.slice(0, prevIdx + 1), ...newMid, ...rp.slice(nxtIdx)]
       }
 
@@ -261,9 +262,9 @@ export function routeReducer(state, action) {
       const prevIdx = prevBoundary(trkptIndex, rp)
       const nxtIdx = nextBoundary(trkptIndex, rp)
       const seg1Tail = backwardSegment.coords.slice(1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-      applyRoutedTurns(seg1Tail, backwardSegment.turns, 1)
+      applyRoutedTurns(seg1Tail, backwardSegment.turns, 1, backwardSegment.kinds)
       const seg2Mid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-      applyRoutedTurns(seg2Mid, forwardSegment.turns, 1)
+      applyRoutedTurns(seg2Mid, forwardSegment.turns, 1, forwardSegment.kinds)
       const newPts = [...seg1Tail, ...seg2Mid]
       const newAcptPos = seg1Tail.length - 1
       if (newAcptPos >= 0 && newAcptPos < newPts.length) {
@@ -291,20 +292,20 @@ export function routeReducer(state, action) {
       } else if (isFirst) {
         const nxtIdx = nextBoundary(trkptIdx, rp)
         const fwdMid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(fwdMid, forwardSegment.turns, 1)
+        applyRoutedTurns(fwdMid, forwardSegment.turns, 1, forwardSegment.kinds)
         newRp = [centerPoint, ...fwdMid, ...rp.slice(nxtIdx)]
       } else if (isLast) {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const bwdMid = backwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(bwdMid, backwardSegment.turns, 1)
+        applyRoutedTurns(bwdMid, backwardSegment.turns, 1, backwardSegment.kinds)
         newRp = [...rp.slice(0, prevIdx + 1), ...bwdMid, centerPoint]
       } else {
         const prevIdx = prevBoundary(trkptIdx, rp)
         const nxtIdx = nextBoundary(trkptIdx, rp)
         const bwdMid = backwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(bwdMid, backwardSegment.turns, 1)
+        applyRoutedTurns(bwdMid, backwardSegment.turns, 1, backwardSegment.kinds)
         const fwdMid = forwardSegment.coords.slice(1, -1).map((pt) => makeRoutePoint(pt[0], pt[1], { changed: true }))
-        applyRoutedTurns(fwdMid, forwardSegment.turns, 1)
+        applyRoutedTurns(fwdMid, forwardSegment.turns, 1, forwardSegment.kinds)
         newRp = [...rp.slice(0, prevIdx + 1), ...bwdMid, centerPoint, ...fwdMid, ...rp.slice(nxtIdx)]
       }
 
@@ -461,7 +462,11 @@ export function routeReducer(state, action) {
       const fixVals = rp.map((p) => p.eleFix)
       if (!rp.length || fixVals.every((v) => v === null)) return state
       const points2d = rp.map((p) => [p.lat, p.lon])
-      const { cleaned } = cleanElevationSpikes(points2d, fixVals)
+      // 13-5章: トンネル区間の内部は出入口の標高から補間して置き換える。山頂の標高が
+      // 出入口のスパイクと誤判定されないよう、スパイク除去の前に1回、後に1回行う
+      const kinds = rp.map((p) => p.eleStructure)
+      const { cleaned: spikeCleaned } = cleanElevationSpikes(points2d, interpolateStructureElevations(points2d, fixVals, kinds))
+      const cleaned = interpolateStructureElevations(points2d, spikeCleaned, kinds)
       if (state.gradeFix !== null && cleaned.every((v, i) => v === fixVals[i])) return state
       const newRp = rp.map((p, i) => ({ ...p, eleFix: cleaned[i] }))
       const gradeFix = computeGradeStats(points2d, cleaned)

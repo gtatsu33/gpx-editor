@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { buildGpx } from '../lib/gpx.js'
 import { cleanElevationSpikes, computeGradeStats, fetchElevationsForIndices } from '../lib/elevation.js'
+import { interpolateStructureElevations } from '../lib/structures.js'
 import { isSupabaseConfigured, uploadGpx } from '../lib/supabase.js'
 
 function isOrgComplete(routePoints) {
@@ -75,7 +76,10 @@ export default function SaveDialog({
         })
       }
 
-      const { cleaned } = cleanElevationSpikes(points, currentFix)
+      // spec.txt 13-5章: トンネル区間の内部は出入口の標高から補間（FINALIZE_ELE_FIXと同じ手順）
+      const kinds = routePoints.map((p) => p.eleStructure)
+      const { cleaned: spikeCleaned } = cleanElevationSpikes(points, interpolateStructureElevations(points, currentFix, kinds))
+      const cleaned = interpolateStructureElevations(points, spikeCleaned, kinds)
       const gradeFix = computeGradeStats(points, cleaned)
       const fixAvailable = cleaned.every((v) => v !== null)
       const choice = recommendChoice(gradeOrg, gradeFix, orgAvailable, fixAvailable)
