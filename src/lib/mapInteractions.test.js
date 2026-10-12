@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   clusterCandidates,
+  directionArrowPositions,
   nearAllWithinThreshold,
   nearestIndexAtDistance,
   nearestPoint,
@@ -49,5 +50,23 @@ describe('mapInteractions.js', () => {
       { idx: 1, dist: 1 },
       { idx: 5, dist: 3 },
     ])
+  })
+})
+
+describe('directionArrowPositions', () => {
+  // 北へ一直線、1点が約1.11km（0.01°）
+  const pts = Array.from({ length: 13 }, (_, i) => [35 + i * 0.01, 139])
+  const cum = pts.map((_, i) => i * 1112)
+
+  it('5kmごとに最寄りのtrkptへ、進行方向（北=0度）で置く', () => {
+    const r = directionArrowPositions(pts, cum, 5)
+    expect(r.map((a) => a.index)).toEqual([4, 9])
+    r.forEach((a) => expect(a.deg).toBeCloseTo(0, 0))
+  })
+  it('ルート全体が間隔未満なら空', () => {
+    expect(directionArrowPositions(pts.slice(0, 4), cum.slice(0, 4), 5)).toEqual([])
+  })
+  it('点が1つ以下なら空', () => {
+    expect(directionArrowPositions([[35, 139]], [0], 5)).toEqual([])
   })
 })

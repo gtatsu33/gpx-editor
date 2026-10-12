@@ -5,6 +5,7 @@ import { calculateBearing } from '../lib/geo.js'
 import { cumulativeDistances } from '../lib/elevation.js'
 import {
   clusterCandidates,
+  directionArrowPositions,
   nearAllWithinThreshold,
   nearestIndexAtDistance,
   nearestPoint,
@@ -36,10 +37,10 @@ function acptIcon(useRouting) {
   })
 }
 
-function arrowIcon(deg) {
+function arrowIcon(deg, fill = '#e67e22') {
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">` +
-    `<polygon points="12,2 22,20 12,14 2,20" fill="#e67e22" stroke="white" stroke-width="1.5"` +
+    `<polygon points="12,2 22,20 12,14 2,20" fill="${fill}" stroke="white" stroke-width="1.5"` +
     ` transform="rotate(${deg},12,12)"/></svg>`
   return L.divIcon({ html: svg, iconSize: [24, 24], iconAnchor: [12, 12], className: '' })
 }
@@ -343,6 +344,11 @@ const MapView = forwardRef(function MapView(
         handleCandidateOrMenu(e.latlng.lat, e.latlng.lng, trkpts, wpts, { isTrackClick: true })
       })
       addLayer(hitLine)
+    })
+
+    // spec.txt 7-1章: 5kmごとの進行方向矢印（濃い青、操作対象外。カーソル矢印より背面）
+    directionArrowPositions(trkpts, cumulativeDistances(trkpts), 5).forEach(({ index, deg }) => {
+      addLayer(L.marker(trkpts[index], { icon: arrowIcon(deg, '#1a3a8a'), interactive: false, keyboard: false }))
     })
 
     wpts.forEach((w, i) => {

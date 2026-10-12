@@ -1,4 +1,4 @@
-import { haversine } from './geo.js'
+import { calculateBearing, haversine } from './geo.js'
 
 /** 画面上のピクセル距離を、指定緯度・ズームでの実距離（m）に換算する。spec.txt 7-2章。 */
 export function pxToMeters(px, zoom, lat) {
@@ -41,6 +41,25 @@ export function nearestIndexAtDistance(cumDists, targetM) {
     }
   }
   return best
+}
+
+/**
+ * 進行方向矢印を置く位置を返す。spec.txt 7-1章。累積距離がintervalKm、2×intervalKm…に
+ * 最も近いtrkptに置き、向きは前後のtrkptを結んだ進行方向（度）。
+ * ルート全体がintervalKm未満なら空配列。戻り値: [{ index, deg }]
+ */
+export function directionArrowPositions(points, cumDists, intervalKm = 5) {
+  if (points.length < 2) return []
+  const total = cumDists[cumDists.length - 1]
+  const out = []
+  for (let km = intervalKm; km * 1000 <= total; km += intervalKm) {
+    const idx = nearestIndexAtDistance(cumDists, km * 1000)
+    if (out.length && out[out.length - 1].index === idx) continue
+    const a = idx > 0 ? idx - 1 : idx
+    const b = idx < points.length - 1 ? idx + 1 : idx
+    out.push({ index: idx, deg: calculateBearing(points[a][0], points[a][1], points[b][0], points[b][1]) })
+  }
+  return out
 }
 
 /**

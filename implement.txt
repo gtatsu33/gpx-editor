@@ -821,6 +821,10 @@ check_api_status.py の実測でも「ユニーク座標はCDNキャッシュを
 
   MapViewは同じ hoveredKm 状態を購読してカーソル矢印を描画する
   （spec.txt 7-3章）。
+  5kmごとの進行方向矢印（spec.txt 7-1章）は、mapInteractions.jsの
+  directionArrowPositions(points, cumDists, 5)で位置と向きを求め、MapViewの
+  レイヤー再描画で、カーソル矢印と同じarrowIcon(deg, '#1a3a8a')を
+  interactive:falseのマーカーとして置く（v1.17.0）。
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
